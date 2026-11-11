@@ -88,14 +88,14 @@
   }
   // splits text into prose and fenced blocks; an unclosed block (while typing) counts too
   function blocks(t) {
-    var out = [], re = /^```([^\n`]*)\n?/m, rest = String(t || "");
+    var out = [], re = /^(`{3,})([^\n`]*)\n?/m, rest = String(t || "");
     while (rest.length) {
       var m = re.exec(rest);
       if (!m) { out.push({ t: "text", s: rest }); break; }
       if (m.index) out.push({ t: "text", s: rest.slice(0, m.index) });
       rest = rest.slice(m.index + m[0].length);
-      var end = /^```[ \t]*$/m.exec(rest), code = end ? rest.slice(0, end.index) : rest;
-      out.push({ t: "code", info: m[1].trim(), s: code.replace(/\n$/, ""), open: !end });
+      var end = new RegExp("^`{" + m[1].length + ",}[ \\t]*$", "m").exec(rest), code = end ? rest.slice(0, end.index) : rest;
+      out.push({ t: "code", info: m[2].trim(), s: code.replace(/\n$/, ""), open: !end });
       rest = end ? rest.slice(end.index + end[0].length).replace(/^\n/, "") : "";
     }
     return out;
@@ -157,7 +157,7 @@
       return d;
     }
     d.classList.add("a"); if (m.err) d.classList.add("err");
-    d.innerHTML = '<span class="mark" aria-hidden="true">✦</span><div><div class="body">' + (m.err ? esc(m.body) : md(m.body)) + "</div>" +
+    d.innerHTML = '<span class="mark" aria-hidden="true">✦</span><div><div class="body">' + (m.typing ? "" : m.err ? esc(m.body) : md(m.body)) + "</div>" +
       (m.remembered && m.remembered.length ? '<button type="button" class="memo" data-mem="1">🧠 Memory updated: ' + esc(m.remembered.join("; ")) + "</button>" : "") +
       '<div class="acts">' + (m.err ? "" : '<button class="ib" type="button" data-copytext="' + i + '">Copy</button>') +
       (last && userBefore(i) >= 0 ? '<button class="ib" type="button" data-retry="' + i + '" title="Ask again with ' + esc(labelOf(choice)) + '">↻ Retry</button>' : "") +
@@ -242,10 +242,11 @@
       u.id = d.user_id; u.pending = false;
       if (d.removed && d.removed.length) msgs.push({ role: "note", body: "🔒 I took out " + d.removed.join(", ") + " before sending - please don't share personal information." });
       if (d.compacted) msgs.push({ role: "note", body: "This chat is getting long, so older messages were summarised to keep it going." });
-      var a = { role: "ai", id: d.ai_id, body: d.reply, model: d.by, pence: d.pence, remembered: d.remembered };
+      var a = { role: "ai", id: d.ai_id, body: d.reply, model: d.by, pence: d.pence, remembered: d.remembered, typing: true };
       msgs.push(a); render();
       var body = log.querySelector(".turn.a.last .body");
-      if (body) reveal(body, d.reply, function () { render(); });
+      var finish = function () { delete a.typing; render(); };
+      if (body) reveal(body, d.reply, finish); else finish();
     }).catch(function () { wait.remove(); msgs.pop(); render(); msgs.push({ role: "ai", err: true, body: "Couldn't reach the server - check your internet and try again." }); render(); $("text").value = text; })
       .then(function () { busy = false; setSend(); loadInfo(); listThreads(); if (!mob.matches) $("text").focus(); });
   }
