@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<script src="https://civilinitiatives.org/site.js?b=20261111b"></script>
+<meta name="robots" content="noindex, nofollow">
+<title>Launchpad AI</title>
+<meta name="description" content="Launchpad AI: a free AI chat for the Homework Launchpad, with a daily free quota.">
+<link rel="icon" type="image/png" href="/favicon.png">
+<meta name="theme-color" content="#4f46e5">
+<script>
+try{ var m = document.cookie.match(/(?:^|; )hl_theme=(dark|light|system)/), t = m ? m[1] : JSON.parse(localStorage.getItem("hl.theme"));
+     if(t === "dark" || t === "light") document.documentElement.setAttribute("data-theme", t); }catch(e){}
+</script>
+<style>
+:root{--bg:#f6f7fb;--card:#fff;--tool:#eef0f7;--ink:#151a2d;--soft:#5d6582;--rule:#dde1ee;--on:#e3e6ff;--hover:#eceefa;
+  --a1:#4f46e5;--a2:#7c3aed;--ok:#15803d;--bad:#dc2626;--warn:#b45309;
+  --font:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;--mono:ui-monospace,Menlo,Consolas,monospace;color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0d1020;--card:#161a2e;--tool:#12162a;--ink:#e8eaf6;--soft:#9aa1c0;--rule:#272c47;--on:#262b55;--hover:#1d2240;--a1:#818cf8;--a2:#a78bfa;--ok:#4ade80;--bad:#f87171;--warn:#fbbf24;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0d1020;--card:#161a2e;--tool:#12162a;--ink:#e8eaf6;--soft:#9aa1c0;--rule:#272c47;--on:#262b55;--hover:#1d2240;--a1:#818cf8;--a2:#a78bfa;--ok:#4ade80;--bad:#f87171;--warn:#fbbf24;color-scheme:dark}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 var(--font);display:flex;flex-direction:column;overflow:hidden}
+button{font:inherit;color:inherit;cursor:pointer}
+a{color:var(--a1)}
+.top{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--rule);background:var(--card);flex:none}
+.brand{white-space:nowrap;min-width:0;display:flex;align-items:center;gap:8px;font-weight:700;font-size:1.05rem;color:var(--ink);text-decoration:none}
+.brand i{font-style:normal;width:30px;height:30px;border-radius:9px;display:grid;place-items:center;background:linear-gradient(135deg,var(--a1),var(--a2));color:#fff;font-size:1rem}
+.sp{flex:1}
+.quota{display:flex;align-items:center;gap:8px;padding:5px 12px 5px 6px;border-radius:999px;background:var(--tool);border:1px solid var(--rule);font-size:.84rem;white-space:nowrap}
+.quota .ring{width:26px;height:26px;border-radius:50%;background:conic-gradient(var(--ok) calc(var(--p,1)*360deg),var(--rule) 0);display:grid;place-items:center}
+.quota .ring::after{content:"";width:18px;height:18px;border-radius:50%;background:var(--tool)}
+.quota.low .ring{background:conic-gradient(var(--warn) calc(var(--p,1)*360deg),var(--rule) 0)}
+.quota.out .ring{background:conic-gradient(var(--bad) calc(var(--p,1)*360deg),var(--rule) 0)}
+.tbtn{border:1px solid var(--rule);background:transparent;border-radius:10px;padding:6px 10px;color:var(--ink);text-decoration:none;font-size:.88rem}
+.tbtn:hover{background:var(--hover)}
+.cz{flex:1;display:flex;min-height:0}
+.side{width:264px;flex:none;background:var(--tool);border-right:1px solid var(--rule);display:flex;flex-direction:column;min-height:0}
+.newb{margin:12px;border:0;border-radius:12px;padding:10px 12px;background:linear-gradient(135deg,var(--a1),var(--a2));color:#fff;font-weight:600}
+.threads{list-style:none;margin:0;padding:0 6px 10px;overflow:auto;flex:1}
+.threads li{display:flex;align-items:center;gap:4px;border-radius:10px}
+.threads li a{flex:1;min-width:0;padding:8px 10px;color:var(--ink);text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:.9rem}
+.threads li a small{display:block;color:var(--soft);font-size:.74rem}
+.threads li[aria-current="true"]{background:var(--on)}
+.threads li:hover{background:var(--hover)}
+.threads li button{border:0;background:transparent;color:var(--soft);border-radius:8px;padding:4px 7px;visibility:hidden}
+.threads li:hover button,.threads li[aria-current="true"] button{visibility:visible}
+.threads li button[data-armed]{color:#fff;background:var(--bad);visibility:visible}
+.sidefoot{padding:10px 14px;border-top:1px solid var(--rule);font-size:.78rem;color:var(--soft)}
+.main{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
+.log{flex:1;overflow:auto;padding:18px 16px;display:flex;flex-direction:column;gap:12px}
+.log>*{width:100%;max-width:800px;margin-left:auto;margin-right:auto}
+.hello{margin:auto;text-align:center;max-width:560px!important;color:var(--soft)}
+.hello .logo{width:64px;height:64px;margin:0 auto 6px;border-radius:20px;display:grid;place-items:center;font-size:2rem;background:linear-gradient(135deg,var(--a1),var(--a2));color:#fff}
+.hello h2{color:var(--ink);margin:8px 0 4px;font-size:1.5rem}
+.freecard{margin:14px auto 0;max-width:420px;padding:12px 14px;border-radius:14px;border:1px solid var(--rule);background:var(--card);text-align:left;font-size:.88rem}
+.freecard b{color:var(--ink)}
+.ideas{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:14px}
+.ideas button{border:1px solid var(--rule);background:var(--card);border-radius:999px;padding:7px 12px;font-size:.86rem}
+.ideas button:hover{background:var(--hover)}
+.row{display:flex}
+.msg{max-width:min(780px,92%);width:fit-content;padding:10px 14px;border-radius:16px;line-height:1.55;overflow-wrap:anywhere}
+.me{margin-left:auto!important;margin-right:0;background:linear-gradient(135deg,var(--a1),var(--a2));color:#fff;border-bottom-right-radius:6px;white-space:pre-wrap}
+.ai{margin-right:auto!important;margin-left:0;background:var(--card);border:1px solid var(--rule);border-bottom-left-radius:6px}
+.ai p{margin:0 0 8px}.ai p:last-of-type{margin-bottom:0}
+.ai ul,.ai ol{margin:4px 0 8px;padding-left:22px}
+.ai pre{background:var(--tool);border:1px solid var(--rule);border-radius:10px;padding:8px 10px;overflow:auto;white-space:pre}
+.ai code{font-family:var(--mono);font-size:.88em}
+.ai h4{margin:6px 0 4px;font-size:1rem}
+.by{display:block;margin-top:6px;font-size:.72rem;color:var(--soft)}
+.wait{color:var(--soft)}
+.wait::after{content:"";display:inline-block;width:1.2em;animation:dots 1.2s steps(4) infinite}
+@keyframes dots{0%{content:""}25%{content:"."}50%{content:".."}75%{content:"..."}}
+.note{text-align:center;font-size:.8rem;color:var(--soft);max-width:560px!important}
+.dock{flex:none;padding:8px 16px 14px;background:linear-gradient(to bottom,transparent,var(--bg) 30%)}
+.dock>*{max-width:800px;margin-left:auto;margin-right:auto}
+.picks{display:flex;gap:6px;overflow-x:auto;padding:2px 0 8px;scrollbar-width:none}
+.picks::-webkit-scrollbar{display:none}
+.pick{flex:none;border:1px solid var(--rule);background:var(--card);border-radius:999px;padding:5px 11px;font-size:.82rem;display:flex;align-items:center;gap:5px}
+.pick[aria-pressed="true"]{border-color:var(--a1);background:var(--on);font-weight:600}
+.pick small{color:var(--soft);font-weight:600}
+.pick.paid small{color:var(--warn)}
+.sep{flex:none;width:1px;background:var(--rule);margin:4px 2px}
+.compose{display:flex;gap:8px;align-items:flex-end;background:var(--card);border:1px solid var(--rule);border-radius:18px;padding:6px 6px 6px 14px}
+.compose:focus-within{border-color:var(--a1)}
+.compose textarea{flex:1;resize:none;min-height:40px;max-height:200px;border:0;outline:0;padding:9px 0;font:inherit;background:transparent;color:var(--ink)}
+.send{border:0;border-radius:13px;width:42px;height:40px;background:linear-gradient(135deg,var(--a1),var(--a2));color:#fff;font-size:1.1rem}
+.send:disabled{opacity:.5}
+.fine{font-size:.74rem;color:var(--soft);text-align:center;margin-top:6px}
+.gate{margin:60px auto;max-width:460px;text-align:center}
+.gate .newb{display:inline-block;text-decoration:none;margin-top:10px}
+.toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 14px;border-radius:10px;font-size:.86rem;z-index:50}
+@media (max-width:760px){
+  .side{display:none} .side.open{display:flex;position:fixed;inset:57px 0 0 0;width:auto;z-index:20}
+  .quota .lbl,.tbtn .lbl{display:none} .top{padding:8px 10px;gap:6px} .brand span{font-size:.98rem}
+}
+@media (min-width:761px){ #chatsBtn{display:none} }
+</style>
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="/" title="New chat"><i aria-hidden="true">✦</i><span>Launchpad AI</span></a>
+  <span class="sp"></span>
+  <span class="quota" id="quota" title="Free messages left today" hidden><span class="ring" aria-hidden="true"></span><span id="quotaText"></span></span>
+  <button class="tbtn" id="chatsBtn" type="button" aria-label="Your chats">🗂</button>
+  <button class="tbtn" id="themeBtn" type="button" aria-label="Dark or light"></button>
+  <a class="tbtn" id="homeLink" href="https://civilinitiatives.org/" aria-label="Back to the Launchpad">🏠<span class="lbl"> Launchpad</span></a>
+</header>
+<div class="cz">
+  <aside class="side" id="side" aria-label="Your chats">
+    <button type="button" class="newb" id="newBtn" title="New chat (Ctrl+Shift+O)">＋ New chat</button>
+    <ul class="threads" id="threads"></ul>
+    <div class="sidefoot" id="sideFoot">Only you can see your chats.</div>
+  </aside>
+  <section class="main" id="main" aria-label="Chat">
+    <div class="log" id="log" aria-live="polite"></div>
+    <div class="dock">
+      <div class="picks" id="picks" role="group" aria-label="Which AI"></div>
+      <form class="compose" id="form">
+        <textarea id="text" rows="1" maxlength="4000" placeholder="Ask Launchpad AI anything…" aria-label="Your message"></textarea>
+        <button type="submit" class="send" id="sendBtn" aria-label="Send">➤</button>
+      </form>
+      <p class="fine">🔒 Don't share personal information - your full name, address, phone number, school or passwords. The Launchpad removes what it can spot first, and some free AIs may learn from what you type. AI can get things wrong.</p>
+    </div>
+  </section>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.0/dist/umd/supabase.js"></script>
+<script src="https://civilinitiatives.org/auth-store.js?b=20261026a"></script>
+<script src="/app.js?b=20261111a"></script>
+</body>
+</html>
