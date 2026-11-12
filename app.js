@@ -12,7 +12,7 @@
   var reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
   var sb = null, user = null, thread = null, info = null, choice = "auto", busy = false, choices = [], allModels = [], allQuery = "";
   var msgs = [], threads = [], attach = [], fileStore = [], pvFile = null;
-  var ICON = { inhouse: "✦", kimi: "🌙", gemma: "💎", nemotron: "🟩", deepseek: "🐋", minimax: "🧩", auto: "✨", fast: "⚡", maths: "🧠", writing: "✍️", code: "💻", gptoss: "🔷", qwen: "🟣", command: "🟢", mistral: "🟠", glm: "🔵", llama: "🦙", openrouter: "🔀", priority: "⭐", haiku: "🪶", sonnet: "🎼", opus: "🎻" };
+  var ICON = { inhouse: "✦", hwlai: "🔎", kimi: "🌙", gemma: "💎", nemotron: "🟩", deepseek: "🐋", minimax: "🧩", auto: "✨", fast: "⚡", maths: "🧠", writing: "✍️", code: "💻", gptoss: "🔷", qwen: "🟣", command: "🟢", mistral: "🟠", glm: "🔵", llama: "🦙", openrouter: "🔀", priority: "⭐", haiku: "🪶", sonnet: "🎼", opus: "🎻" };
   var GROUPS = [["auto", ""], ["inhouse", ""], ["helper", "Helpers (free)"], ["model", "Pick an AI (free)"], ["claude", "Claude (uses your pence)"]];
   var TEXT_EXT = /\.(txt|md|markdown|csv|tsv|json|html?|css|js|mjs|ts|tsx|jsx|py|java|c|h|cpp|hpp|cs|go|rs|rb|php|lua|swift|kt|sql|xml|svg|yaml|yml|toml|ini|cfg|log|sh|bat|ps1|tex|srt|vtt|gd|sb3\.json)$/i;
   var FILE_MAX = 200000, FILES_CHARS = 40000;
@@ -230,6 +230,7 @@
   function thinkingText() {
     if (choice === "priority") return "Choosing Haiku, Sonnet or Opus";
     if (choice === "auto") return "Picking the best AI";
+    if (choice === "hwlai") return "HWLAI is getting ready to search";
     return labelOf(choice) + " is thinking";
   }
 
@@ -262,7 +263,6 @@
     }
     var payload = { action: "send", thread: thread, text: text, model: choice, files: files.map(function (f) { return { name: f.name, text: f.text }; }) };
     if (cut) payload.cut = cut;
-    if (webOn) payload.search = true;
     var liveSources = null;
     /* the answer streams in: words show as the AI writes them */
     var live = "", liveBody = null, liveTimer = 0;
@@ -291,12 +291,14 @@
         msgs.pop(); render();
         msgs.push({ role: "ai", err: true, body: (d && d.error) || "Something went wrong - try again." });
         if (d && d.inhouse && info) { info.inhouse = Object.assign({}, info.inhouse || {}, d.inhouse); meter(); }
+        if (d && d.hwlai && info) { info.hwlai = Object.assign({}, info.hwlai || {}, d.hwlai); meter(); }
         if (d && d.outOfInhouse) msgs.push({ role: "note", html: '<button type="button" data-usage="1">See your in-house AI usage</button>' });
         if (d && d.outOfFree) msgs.push({ role: "note", html: 'Out of free messages for today. <button type="button" data-usehaiku="1">Use Claude Haiku' + (info ? " (" + info.haiku_pence + "p)" : "") + "</button>" });
         render(); $("text").value = text; grow(); setSend(); return;
       }
       u.id = d.user_id; u.pending = false;
       if (d.inhouse && info) { info.inhouse = Object.assign({}, info.inhouse || {}, d.inhouse); meter(); }
+      if (d.hwlai && info) { info.hwlai = Object.assign({}, info.hwlai || {}, d.hwlai); meter(); }
       if (d.removed && d.removed.length) msgs.push({ role: "note", body: "🔒 I took out " + d.removed.join(", ") + " before sending - please don't share personal information." });
       if (d.compacted) msgs.push({ role: "note", body: "This chat is getting long, so older messages were summarised to keep it going." });
       var a = { role: "ai", id: d.ai_id, body: d.reply, model: d.by, pence: d.pence, remembered: d.remembered, sources: d.sources || null, typing: true };
@@ -463,10 +465,7 @@
     var p = info[id + "_pence"]; return p == null ? "" : p + "p";
   }
   function saveChoice() { try { localStorage.setItem("hl.ai.pick2", choice); } catch (e) {} }
-  /* 🔎 Search: HWLAI searches the web with the Launchpad's own search engine, reads the top pages and answers with sources */
-  var webOn = false; try { webOn = localStorage.getItem("hl.ai.web") === "1"; } catch (e) {}
-  function drawWeb() { var b = $("webBtn"); if (!b) return; b.setAttribute("aria-pressed", webOn ? "true" : "false"); b.classList.toggle("on", webOn); b.title = webOn ? "Web search is on: answers come from web pages, with sources" : "Search the web first (HWLAI search)"; }
-  if ($("webBtn")) { $("webBtn").onclick = function () { webOn = !webOn; try { localStorage.setItem("hl.ai.web", webOn ? "1" : "0"); } catch (e) {} drawWeb(); $("text").focus(); }; drawWeb(); }
+
   function drawModel() {
     var c = findChoice(choice) || choices[0]; if (!c) return;
     var exact = /^m:/.test(c.id);
@@ -481,7 +480,7 @@
       if (g[1]) out += "<h3>" + esc(g[1]) + "</h3>";
       out += list.map(function (c) {
         return '<button type="button" class="opt" role="menuitemradio" aria-checked="' + (c.id === choice) + '" data-pick="' + esc(c.id) + '"><span class="ic">' + (ICON[c.id] || "🤖") + "</span><b>" + esc(c.label) + "</b>" +
-          (c.free ? (c.id === "inhouse" && info && info.inhouse && !info.inhouse.unlimited ? "<em class=\"ih\">" + Math.round((info.inhouse.session_used / (info.inhouse.session_limit || 1)) * 100) + "% used</em>" : "<span></span>") : "<em>" + esc(priceOf(c.id)) + "</em>") + "<small>" + esc(c.sub) + "</small></button>";
+          (c.free ? (allow(c.id) && !allow(c.id).unlimited ? "<em class=\"ih\">" + Math.round((allow(c.id).session_used / (allow(c.id).session_limit || 1)) * 100) + "% used</em>" : "<span></span>") : "<em>" + esc(priceOf(c.id)) + "</em>") + "<small>" + esc(c.sub) + "</small></button>";
       }).join("");
     });
     if (allModels.length) {
@@ -532,11 +531,13 @@
     var left = Math.max(0, info.free_per_day - info.free_used);
     return left + " of " + info.free_per_day + " free messages left today. Claude uses your Launchpad pence.";
   }
+  /* Launchpad AI and HWLAI each have their own allowance (a session and a week) */
+  function allow(id) { return info && (id === "inhouse" ? info.inhouse : id === "hwlai" ? info.hwlai : null); }
   function meter() {
     var q = $("quota"); if (!info) { q.hidden = true; return; }
     q.hidden = false;
-    var ih = info.inhouse;
-    if (choice === "inhouse" && ih && !ih.unlimited) {
+    var ih = allow(choice);
+    if (ih && !ih.unlimited) {
       var sp = ih.session_limit ? Math.min(1, ih.session_used / ih.session_limit) : 0, wp = ih.week_limit ? Math.min(1, ih.week_used / ih.week_limit) : 0, worst = Math.max(sp, wp);
       q.className = "quota" + (worst >= 1 ? " out" : worst > 0.8 ? " low" : ""); q.style.setProperty("--p", 1 - worst);
       $("quotaText").innerHTML = "<b>" + Math.round(sp * 100) + "%</b><span class=\"lbl\"> of session used</span>";
@@ -578,16 +579,14 @@
   function usageHtml() {
     if (!info) return "<p>Loading…</p>";
     var out = "<h2>Usage</h2>";
-    var ih = info.inhouse, hasIn = ih && choices.some(function (c) { return c.id === "inhouse"; });
-    if (hasIn) {
-      out += '<h3>✦ Launchpad AI</h3>';
-      if (ih.unlimited) out += '<p class="upace">Unlimited on your account.</p>';
-      else {
-        out += '<p class="upace">' + esc(pace(ih)) + "</p>";
-        out += bar("Current session", ih.session_resets ? "Resets at " + esc(clock(ih.session_resets)) : "Starts with your next in-house message and lasts " + ih.session_hours + " hours", ih.session_used, ih.session_limit);
-        out += bar("This week", "Resets " + esc(clock(ih.week_resets, true)), ih.week_used, ih.week_limit);
-      }
-    }
+    [["inhouse", "✦ Launchpad AI", "message"], ["hwlai", "🔎 HWLAI", "search"]].forEach(function (k) {
+      var ih = allow(k[0]); if (!ih || !choices.some(function (c) { return c.id === k[0]; })) return;
+      out += "<h3>" + k[1] + "</h3>";
+      if (ih.unlimited) { out += '<p class="upace">Unlimited on your account.</p>'; return; }
+      out += '<p class="upace">' + esc(pace(ih)) + "</p>";
+      out += bar("Current session", ih.session_resets ? "Resets at " + esc(clock(ih.session_resets)) : "Starts with your next " + k[2] + " and lasts " + ih.session_hours + " hours", ih.session_used, ih.session_limit);
+      out += bar("This week", "Resets " + esc(clock(ih.week_resets, true)), ih.week_used, ih.week_limit);
+    });
     out += "<h3>Free AIs</h3>";
     if (info.unlimited) out += '<p class="upace">Unlimited on your account.</p>';
     else {
@@ -718,6 +717,12 @@
         if (!findChoice(choice)) choice = findChoice("inhouse") ? "inhouse" : "auto";
         drawModel(); loadInfo();
         var c = new URLSearchParams(location.search).get("c");
+        var hp = new URLSearchParams(location.hash.slice(1)), ask = (hp.get("ask") || "").slice(0, 4000), pick = hp.get("ai");
+        if (ask) {
+          history.replaceState(null, "", location.pathname);
+          if (pick && findChoice(pick)) { choice = pick; drawModel(); meter(); }   // just for this chat: your usual pick stays
+          listThreads(); hello(); $("text").value = ask; grow(); send(); return;
+        }
         listThreads(); if (c) openThread(c); else hello();
         $("text").focus();
       });
