@@ -160,6 +160,14 @@ button.chip{cursor:pointer}
 .opt em{font-style:normal;font-size:.78rem;color:var(--warn);font-weight:600}
 .opt .ic{grid-row:1/3;font-size:1rem}
 
+.msearch{width:calc(100% - 16px);margin:2px 8px 6px;padding:7px 10px;border:1px solid var(--rule);border-radius:9px;background:var(--bg);color:var(--ink);font:inherit;font-size:.86rem}
+.mmore{font-size:.76rem;color:var(--faint);margin:6px 10px}
+.atbox{position:absolute;bottom:calc(100% + 6px);left:8px;width:min(320px,calc(100vw - 32px));background:var(--card);border:1px solid var(--rule);border-radius:14px;box-shadow:0 12px 40px -10px rgba(10,12,40,.35);padding:6px;z-index:31}
+.atbox p{font-size:.72rem;color:var(--faint);margin:4px 10px 4px;font-weight:600}
+.atbox button{display:flex;align-items:center;gap:8px;width:100%;text-align:left;border:0;background:transparent;border-radius:9px;padding:7px 10px}
+.atbox button[aria-selected="true"],.atbox button:hover{background:var(--hover)}
+.atbox b{font-size:.88rem;font-family:var(--mono)}
+.atbox small{color:var(--faint);font-size:.76rem;margin-left:auto}
 /* file preview panel, beside the chat */
 .panel{width:min(48vw,720px);flex:none;border-left:1px solid var(--rule);background:var(--card);display:flex;flex-direction:column;min-height:0}
 .panel header{display:flex;align-items:center;gap:6px;padding:10px 10px 10px 16px;border-bottom:1px solid var(--rule)}
@@ -226,7 +234,7 @@ dialog::backdrop{background:rgba(10,12,30,.45)}
   <div class="dock" id="dock">
     <form class="compose" id="form">
       <div class="chips" id="att" hidden></div>
-      <textarea id="text" rows="1" maxlength="4000" placeholder="How can I help you today?" aria-label="Your message"></textarea>
+      <textarea id="text" rows="1" maxlength="4000" placeholder="How can I help you today? Type @ to ask a particular AI" aria-label="Your message"></textarea>
       <div class="crow">
         <button type="button" class="mbtn" id="attBtn" aria-label="Attach files" title="Attach text or code files">📎</button>
         <input type="file" id="fileIn" multiple hidden>
@@ -255,6 +263,6 @@ dialog::backdrop{background:rgba(10,12,30,.45)}
 </div></dialog>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.0/dist/umd/supabase.js"></script>
 <script src="https://civilinitiatives.org/auth-store.js?b=20261026a"></script>
-<script src="/app.js?b=20261111d"></script>
+<script src="/app.js?b=20261112a"></script>
 </body>
 </html>

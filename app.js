@@ -10,9 +10,9 @@
   var esc = function (s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); };
   var html = document.documentElement, mob = matchMedia("(max-width:860px)");
   var reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  var sb = null, user = null, thread = null, info = null, choice = "auto", busy = false, choices = [];
+  var sb = null, user = null, thread = null, info = null, choice = "auto", busy = false, choices = [], allModels = [], allQuery = "";
   var msgs = [], threads = [], attach = [], fileStore = [], pvFile = null;
-  var ICON = { auto: "✨", fast: "⚡", maths: "🧠", writing: "✍️", code: "💻", gptoss: "🔷", qwen: "🟣", command: "🟢", mistral: "🟠", glm: "🔵", llama: "🦙", openrouter: "🔀", priority: "⭐", haiku: "🪶", sonnet: "🎼", opus: "🎻" };
+  var ICON = { kimi: "🌙", gemma: "💎", nemotron: "🟩", deepseek: "🐋", minimax: "🧩", auto: "✨", fast: "⚡", maths: "🧠", writing: "✍️", code: "💻", gptoss: "🔷", qwen: "🟣", command: "🟢", mistral: "🟠", glm: "🔵", llama: "🦙", openrouter: "🔀", priority: "⭐", haiku: "🪶", sonnet: "🎼", opus: "🎻" };
   var GROUPS = [["auto", ""], ["helper", "Helpers (free)"], ["model", "Pick an AI (free)"], ["claude", "Claude (uses your pence)"]];
   var TEXT_EXT = /\.(txt|md|markdown|csv|tsv|json|html?|css|js|mjs|ts|tsx|jsx|py|java|c|h|cpp|hpp|cs|go|rs|rb|php|lua|swift|kt|sql|xml|svg|yaml|yml|toml|ini|cfg|log|sh|bat|ps1|tex|srt|vtt|gd|sb3\.json)$/i;
   var FILE_MAX = 200000, FILES_CHARS = 40000;
@@ -165,7 +165,8 @@
     return d;
   }
   function userBefore(i) { for (var j = i - 1; j >= 0; j--) if (msgs[j].role === "user") return msgs[j].id ? j : -1; return -1; }
-  function labelOf(id) { var c = choices.filter(function (x) { return x.id === id; })[0]; return c ? c.label : "Auto"; }
+  function findChoice(id) { return choices.filter(function (x) { return x.id === id; })[0] || allModels.filter(function (x) { return x.id === id; })[0]; }
+  function labelOf(id) { var c = findChoice(id); return c ? c.label : "Auto"; }
 
   log.addEventListener("click", function (e) {
     var t = e.target.closest("button"); if (!t) return;
@@ -264,6 +265,36 @@
   function setSend() { $("sendBtn").disabled = busy || (!$("text").value.trim() && !attach.length); }
   function grow() { var ta = $("text"); ta.style.height = "auto"; ta.style.height = Math.min(240, ta.scrollHeight) + "px"; setSend(); }
   $("text").addEventListener("input", grow);
+  /* "@kimi ..." sends one message to that AI: suggest names while typing the @ word */
+  var atBox = null, atSel = 0;
+  function atList() {
+    var ta = $("text"), m = /^@([\w.\-]*)$/.exec(ta.value.slice(0, ta.selectionStart));
+    if (!m) return null;
+    var q = m[1].toLowerCase();
+    return choices.filter(function (c) { return c.id !== "auto" && (!q || c.id.indexOf(q) === 0 || c.label.toLowerCase().replace(/[^a-z0-9]/g, "").indexOf(q.replace(/[^a-z0-9]/g, "")) === 0); }).slice(0, 8);
+  }
+  function atShow() {
+    var list = atList();
+    if (!list || !list.length) { if (atBox) { atBox.remove(); atBox = null; } return; }
+    if (!atBox) { atBox = document.createElement("div"); atBox.className = "atbox"; atBox.setAttribute("role", "listbox"); $("form").appendChild(atBox); }
+    atSel = Math.min(atSel, list.length - 1);
+    atBox.innerHTML = '<p>Send this message to…</p>' + list.map(function (c, i) {
+      return '<button type="button" role="option" aria-selected="' + (i === atSel) + '" data-at="' + esc(c.id) + '"><span>' + (ICON[c.id] || "🤖") + "</span><b>@" + esc(c.id) + "</b><small>" + esc(c.label) + (c.free ? "" : " · " + esc(priceOf(c.id))) + "</small></button>";
+    }).join("");
+  }
+  function atPick(id) {
+    var ta = $("text"); ta.value = "@" + id + " " + ta.value.replace(/^@[\w.\-]*\s*/, ""); ta.focus(); ta.setSelectionRange(id.length + 2, id.length + 2);
+    if (atBox) { atBox.remove(); atBox = null; } grow();
+  }
+  $("text").addEventListener("input", function () { atSel = 0; atShow(); });
+  $("text").addEventListener("keydown", function (e) {
+    if (!atBox) return;
+    var opts = atBox.querySelectorAll("[data-at]");
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); atSel = (atSel + (e.key === "ArrowDown" ? 1 : opts.length - 1)) % opts.length; atShow(); }
+    else if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) { e.preventDefault(); e.stopImmediatePropagation(); atPick(opts[atSel].dataset.at); }
+    else if (e.key === "Escape") { atBox.remove(); atBox = null; }
+  }, true);
+  document.addEventListener("click", function (e) { var b = e.target.closest("[data-at]"); if (b) { atPick(b.dataset.at); return; } if (atBox && !e.target.closest(".atbox,#text")) { atBox.remove(); atBox = null; } });
   $("text").addEventListener("keydown", function (e) { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); } });
 
   /* ---------- attaching files (text and code; read here, sent as text) ---------- */
@@ -324,9 +355,10 @@
   }
   function saveChoice() { try { localStorage.setItem("hl.ai.pick", choice); } catch (e) {} }
   function drawModel() {
-    var c = choices.filter(function (x) { return x.id === choice; })[0] || choices[0]; if (!c) return;
-    $("modelBtn").innerHTML = (ICON[c.id] || "🤖") + " " + esc(c.label) + (c.free ? "" : " <small>" + esc(priceOf(c.id)) + "</small>") + " ▾";
-    $("modelBtn").title = c.sub;
+    var c = findChoice(choice) || choices[0]; if (!c) return;
+    var exact = /^m:/.test(c.id);
+    $("modelBtn").innerHTML = (exact ? "🎯" : (ICON[c.id] || "🤖")) + " " + esc(c.label) + (c.free === false ? " <small>" + esc(priceOf(c.id)) + "</small>" : "") + " ▾";
+    $("modelBtn").title = exact ? c.label + " on " + c.by : c.sub;
   }
   function drawMenu() {
     var m = $("menu"), out = "";
@@ -339,8 +371,19 @@
           (c.free ? "<span></span>" : "<em>" + esc(priceOf(c.id)) + "</em>") + "<small>" + esc(c.sub) + "</small></button>";
       }).join("");
     });
+    if (allModels.length) {
+      out += '<h3>All models (free)</h3><input class="msearch" id="mSearch" type="search" placeholder="Search ' + allModels.length + ' models" aria-label="Search all models" value="' + esc(allQuery) + '"><div id="mAll">' + allHtml() + "</div>";
+    }
     if (info && !info.unlimited) out += '<h3 style="margin-top:10px">' + Math.max(0, info.free_per_day - info.free_used) + " free messages left today · " + Number(info.pence).toLocaleString("en-GB") + "p to spend</h3>";
     m.innerHTML = out;
+  }
+  /* every chat model the services offer, searchable; shows 40 at a time */
+  function allHtml() {
+    var q = allQuery.trim().toLowerCase(), list = allModels.filter(function (m) { return !q || (m.label + " " + m.by + " " + m.id).toLowerCase().indexOf(q) >= 0; });
+    var shown = list.slice(0, 40).map(function (m) {
+      return '<button type="button" class="opt" role="menuitemradio" aria-checked="' + (m.id === choice) + '" data-pick="' + esc(m.id) + '"><span class="ic">🎯</span><b>' + esc(m.label) + "</b><span></span><small>" + esc(m.by) + "</small></button>";
+    }).join("");
+    return shown + (list.length > 40 ? '<p class="mmore">' + (list.length - 40) + " more - search to narrow it down</p>" : "") + (list.length ? "" : '<p class="mmore">No models match.</p>');
   }
   function menu(open) {
     var m = $("menu"); if (open == null) open = m.hidden;
@@ -352,7 +395,12 @@
     var b = e.target.closest("[data-pick]"); if (!b) return;
     choice = b.dataset.pick; saveChoice(); drawModel(); menu(false); $("text").focus(); render();
   });
+  $("menu").addEventListener("input", function (e) {
+    if (e.target.id !== "mSearch") return;
+    allQuery = e.target.value; $("mAll").innerHTML = allHtml();
+  });
   $("menu").addEventListener("keydown", function (e) {
+    if (e.target.id === "mSearch" && (e.key === "ArrowUp" || e.key === "ArrowDown")) { e.preventDefault(); var first = $("mAll").querySelector(".opt"); if (first) first.focus(); return; }
     var opts = Array.prototype.slice.call($("menu").querySelectorAll(".opt")), i = opts.indexOf(document.activeElement);
     if (e.key === "ArrowDown") { e.preventDefault(); (opts[i + 1] || opts[0]).focus(); }
     if (e.key === "ArrowUp") { e.preventDefault(); (opts[i - 1] || opts[opts.length - 1]).focus(); }
@@ -489,9 +537,9 @@
     sb.rpc("my_features").then(function (f) {
       if (f.data && f.data.hwchat === false) { gate("<h2>Launchpad AI</h2><p>Launchpad AI is switched off for your account just now.</p>"); return; }
       sb.functions.invoke("hwchat", { body: { action: "models" } }).then(function (r) {
-        choices = (r.data && r.data.choices) || [];
+        choices = (r.data && r.data.choices) || []; allModels = (r.data && r.data.all) || [];
         if (!choices.length) { gate("<h2>Launchpad AI</h2><p>Launchpad AI needs the latest Launchpad update on the server.</p>"); return; }
-        if (!choices.some(function (c) { return c.id === choice; })) choice = "auto";
+        if (!findChoice(choice)) choice = "auto";
         drawModel(); loadInfo();
         var c = new URLSearchParams(location.search).get("c");
         listThreads(); if (c) openThread(c); else hello();
