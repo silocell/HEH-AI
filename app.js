@@ -158,12 +158,29 @@
       return d;
     }
     d.classList.add("a"); if (m.err) d.classList.add("err");
-    d.innerHTML = '<span class="mark" aria-hidden="true">✦</span><div><div class="body">' + (m.typing ? "" : m.err ? esc(m.body) : md(m.body)) + "</div>" +
+    d.innerHTML = '<span class="mark" aria-hidden="true">✦</span><div><div class="body">' + (m.typing ? "" : m.err ? esc(m.body) : cites(md(m.body), m.sources)) + "</div>" +
+      (m.sources && m.sources.length && !m.typing ? sourcesHtml(m.sources) : "") +
       (m.remembered && m.remembered.length ? '<button type="button" class="memo" data-mem="1">🧠 Memory updated: ' + esc(m.remembered.join("; ")) + "</button>" : "") +
       '<div class="acts">' + (m.err ? "" : '<button class="ib" type="button" data-copytext="' + i + '">Copy</button>') +
       (last && userBefore(i) >= 0 ? '<button class="ib" type="button" data-retry="' + i + '" title="Ask again with ' + esc(labelOf(choice)) + '">↻ Retry</button>' : "") +
       (m.model || m.stopped ? '<span class="by">' + esc(byLine(m)) + "</span>" : "") + "</div></div>";
     return d;
+  }
+  /* web search answers: [2] becomes a link to source 2 (not inside code), and the sources are listed underneath */
+  function srcUrl(u) { try { var x = new URL(u); return x.protocol === "https:" || x.protocol === "http:" ? x.href : ""; } catch (e) { return ""; } }
+  function cites(html, src) {
+    if (!src || !src.length) return html;
+    return html.split(/(<pre[\s\S]*?<\/pre>|<code[\s\S]*?<\/code>)/).map(function (part, k) {
+      if (k % 2) return part;
+      return part.replace(/\[(\d{1,2})\]/g, function (all, n) {
+        var s = src[+n - 1], u = s && srcUrl(s.url); if (!u) return all;
+        return '<a class="cite" href="' + esc(u) + '" target="_blank" rel="noopener noreferrer nofollow" title="' + esc(s.title + " - " + s.site) + '">' + n + "</a>";
+      });
+    }).join("");
+  }
+  function sourcesHtml(src) {
+    return '<div class="srcs" aria-label="Sources">' + src.map(function (s) { var u = srcUrl(s.url); if (!u) return "";
+      return '<a href="' + esc(u) + '" target="_blank" rel="noopener noreferrer nofollow" title="' + esc(s.title) + '"><b>' + (+s.n) + "</b><span>" + esc(s.title) + "</span><small>" + esc(s.site) + "</small></a>"; }).join("") + "</div>";
   }
   function userBefore(i) { for (var j = i - 1; j >= 0; j--) if (msgs[j].role === "user") return msgs[j].id ? j : -1; return -1; }
   function findChoice(id) { return choices.filter(function (x) { return x.id === id; })[0] || allModels.filter(function (x) { return x.id === id; })[0]; }
@@ -239,9 +256,14 @@
       var st = wait.querySelector(".think span");
       if (o.s === "thinking" && st) st.textContent = (choice === "auto" || choice === "priority" ? "Thinking it through" : labelOf(choice) + " is thinking it through") + "…";
       if (o.s === "next") said("That AI was busy or slow, so another one is answering instead.");
+      if (o.s === "searching" && st) st.textContent = "Searching the web…";
+      if (o.s === "reading" && st) st.textContent = "Reading " + o.n + " page" + (o.n === 1 ? "" : "s") + "…";
+      if (o.sources) { liveSources = o.sources; if (st) st.textContent = "Writing an answer from " + o.sources.length + " source" + (o.sources.length === 1 ? "" : "s") + "…"; }
     }
     var payload = { action: "send", thread: thread, text: text, model: choice, files: files.map(function (f) { return { name: f.name, text: f.text }; }) };
     if (cut) payload.cut = cut;
+    if (webOn) payload.search = true;
+    var liveSources = null;
     /* the answer streams in: words show as the AI writes them */
     var live = "", liveBody = null, liveTimer = 0;
     function onDelta(t) {
@@ -277,7 +299,7 @@
       if (d.inhouse && info) { info.inhouse = Object.assign({}, info.inhouse || {}, d.inhouse); meter(); }
       if (d.removed && d.removed.length) msgs.push({ role: "note", body: "🔒 I took out " + d.removed.join(", ") + " before sending - please don't share personal information." });
       if (d.compacted) msgs.push({ role: "note", body: "This chat is getting long, so older messages were summarised to keep it going." });
-      var a = { role: "ai", id: d.ai_id, body: d.reply, model: d.by, pence: d.pence, remembered: d.remembered, typing: true };
+      var a = { role: "ai", id: d.ai_id, body: d.reply, model: d.by, pence: d.pence, remembered: d.remembered, sources: d.sources || null, typing: true };
       msgs.push(a);
       if (d.note) msgs.push({ role: "note", html: esc(d.note) + ' <button type="button" data-usage="1">See usage</button>' });
       if (d.cut) msgs.push({ role: "note", body: "⚠ This answer may have been cut short. Say “carry on” to get the rest." });
@@ -441,6 +463,10 @@
     var p = info[id + "_pence"]; return p == null ? "" : p + "p";
   }
   function saveChoice() { try { localStorage.setItem("hl.ai.pick2", choice); } catch (e) {} }
+  /* 🔎 Search: HWLAI searches the web with the Launchpad's own search engine, reads the top pages and answers with sources */
+  var webOn = false; try { webOn = localStorage.getItem("hl.ai.web") === "1"; } catch (e) {}
+  function drawWeb() { var b = $("webBtn"); if (!b) return; b.setAttribute("aria-pressed", webOn ? "true" : "false"); b.classList.toggle("on", webOn); b.title = webOn ? "Web search is on: answers come from web pages, with sources" : "Search the web first (HWLAI search)"; }
+  if ($("webBtn")) { $("webBtn").onclick = function () { webOn = !webOn; try { localStorage.setItem("hl.ai.web", webOn ? "1" : "0"); } catch (e) {} drawWeb(); $("text").focus(); }; drawWeb(); }
   function drawModel() {
     var c = findChoice(choice) || choices[0]; if (!c) return;
     var exact = /^m:/.test(c.id);
@@ -666,8 +692,8 @@
     thread = id; history.replaceState(null, "", "?c=" + encodeURIComponent(id)); drawThreads();
     unhello(); log.innerHTML = '<p class="note">Loading…</p>';
     var q = function (cols) { return sb.from("hw_messages").select(cols).eq("thread_id", id).order("id").limit(500); };
-    q("id,role,body,model,pence,files,stopped").then(function (r) { return r.error ? q("id,role,body,model,pence,files") : r; }).then(function (r) {
-      msgs = (r.data || []).map(function (m) { return { id: m.id, role: m.role, body: m.body, model: m.role === "ai" ? m.model : "", pence: m.pence, files: m.files, stopped: !!m.stopped }; });
+    q("id,role,body,model,pence,files,stopped,sources").then(function (r) { return r.error ? q("id,role,body,model,pence,files") : r; }).then(function (r) {
+      msgs = (r.data || []).map(function (m) { return { id: m.id, role: m.role, body: m.body, model: m.role === "ai" ? m.model : "", pence: m.pence, files: m.files, stopped: !!m.stopped, sources: Array.isArray(m.sources) ? m.sources : null }; });
       render(); down(true); if (then) then();
     });
   }
