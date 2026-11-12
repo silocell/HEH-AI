@@ -231,7 +231,7 @@
     var slowEl = wait.querySelector(".slow"), said = function (t) { if (slowEl) { slowEl.textContent = t; slowEl.hidden = false; down(); } };
     var timers = [
       setTimeout(function () { said("Still working. Hard questions can take a minute or two."); }, 20000),
-      setTimeout(function () { said("This is taking longer than usual. Press ■ to stop, or keep waiting (up to 5 minutes)."); }, 75000)];
+      setTimeout(function () { said("This is taking longer than usual. Press ■ to stop, or keep waiting (it can take up to 30 minutes)."); }, 75000)];
     var quiet = function () { timers.forEach(clearTimeout); timers = []; };
     function onEvent(o) {
       if (o.thread && o.thread !== thread) { thread = o.thread; history.replaceState(null, "", "?c=" + encodeURIComponent(thread)); }
