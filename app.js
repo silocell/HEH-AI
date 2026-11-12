@@ -12,11 +12,12 @@
   var reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
   var sb = null, user = null, thread = null, info = null, choice = "auto", busy = false, choices = [], allModels = [], allQuery = "";
   var msgs = [], threads = [], attach = [], fileStore = [], pvFile = null;
-  var ICON = { kimi: "🌙", gemma: "💎", nemotron: "🟩", deepseek: "🐋", minimax: "🧩", auto: "✨", fast: "⚡", maths: "🧠", writing: "✍️", code: "💻", gptoss: "🔷", qwen: "🟣", command: "🟢", mistral: "🟠", glm: "🔵", llama: "🦙", openrouter: "🔀", priority: "⭐", haiku: "🪶", sonnet: "🎼", opus: "🎻" };
-  var GROUPS = [["auto", ""], ["helper", "Helpers (free)"], ["model", "Pick an AI (free)"], ["claude", "Claude (uses your pence)"]];
+  var ICON = { inhouse: "✦", kimi: "🌙", gemma: "💎", nemotron: "🟩", deepseek: "🐋", minimax: "🧩", auto: "✨", fast: "⚡", maths: "🧠", writing: "✍️", code: "💻", gptoss: "🔷", qwen: "🟣", command: "🟢", mistral: "🟠", glm: "🔵", llama: "🦙", openrouter: "🔀", priority: "⭐", haiku: "🪶", sonnet: "🎼", opus: "🎻" };
+  var GROUPS = [["auto", ""], ["inhouse", ""], ["helper", "Helpers (free)"], ["model", "Pick an AI (free)"], ["claude", "Claude (uses your pence)"]];
   var TEXT_EXT = /\.(txt|md|markdown|csv|tsv|json|html?|css|js|mjs|ts|tsx|jsx|py|java|c|h|cpp|hpp|cs|go|rs|rb|php|lua|swift|kt|sql|xml|svg|yaml|yml|toml|ini|cfg|log|sh|bat|ps1|tex|srt|vtt|gd|sb3\.json)$/i;
   var FILE_MAX = 200000, FILES_CHARS = 40000;
-  try { choice = localStorage.getItem("hl.ai.pick") || "auto"; } catch (e) {}
+  /* Launchpad AI (our own gpt-oss-120b) is the default; "hl.ai.pick2" so everyone starts on it once */
+  try { choice = localStorage.getItem("hl.ai.pick2") || "inhouse"; } catch (e) { choice = "inhouse"; }
   try {
     sb = window.supabase.createClient(URL_, KEY_, { auth: { persistSession: true, autoRefreshToken: true, storage: (window.HEHAuth && window.HEHAuth.storage) || undefined } });
   } catch (e) { sb = null; }
@@ -138,7 +139,7 @@
         : '<button type="button" class="chip" data-attview="' + (fileStore.push({ name: f.name, text: f.text }) - 1) + '">📄 <span>' + esc(f.name) + "</span></button>";
     }).join("");
   }
-  function byLine(m) { return (m.model || "") + (m.pence ? " · " + m.pence + "p" : ""); }
+  function byLine(m) { return (m.model || "") + (m.pence ? " · " + m.pence + "p" : "") + (m.stopped ? (m.model ? " · " : "") + "Stopped" : ""); }
   function render() {
     fileStore = []; unhello(); log.textContent = "";
     if (!msgs.length) { hello(); return; }
@@ -161,7 +162,7 @@
       (m.remembered && m.remembered.length ? '<button type="button" class="memo" data-mem="1">🧠 Memory updated: ' + esc(m.remembered.join("; ")) + "</button>" : "") +
       '<div class="acts">' + (m.err ? "" : '<button class="ib" type="button" data-copytext="' + i + '">Copy</button>') +
       (last && userBefore(i) >= 0 ? '<button class="ib" type="button" data-retry="' + i + '" title="Ask again with ' + esc(labelOf(choice)) + '">↻ Retry</button>' : "") +
-      (m.model ? '<span class="by">' + esc(byLine(m)) + "</span>" : "") + "</div></div>";
+      (m.model || m.stopped ? '<span class="by">' + esc(byLine(m)) + "</span>" : "") + "</div></div>";
     return d;
   }
   function userBefore(i) { for (var j = i - 1; j >= 0; j--) if (msgs[j].role === "user") return msgs[j].id ? j : -1; return -1; }
@@ -178,6 +179,7 @@
     else if (t.dataset.edit != null) editAt(+t.dataset.edit);
     else if (t.dataset.retry != null) { var j = userBefore(+t.dataset.retry); if (j >= 0) ask(msgs[j].body, msgs[j].files || [], msgs[j].id, j); }
     else if (t.dataset.mem) openMemory();
+    else if (t.dataset.usage) { usage(true); loadInfo(); }
     else if (t.dataset.usehaiku) { choice = "haiku"; saveChoice(); drawModel(); toast("Switched to Claude Haiku."); }
   });
 
@@ -222,34 +224,112 @@
     msgs.push({ role: "user", body: text, files: files, pending: true });
     render();
     var wait = document.createElement("div"); wait.className = "turn a";
-    wait.innerHTML = '<span class="mark" aria-hidden="true">✦</span><div class="think"><i></i><span>' + esc(thinkingText()) + "…</span></div>";
+    wait.innerHTML = '<span class="mark" aria-hidden="true">✦</span><div><div class="think"><i></i><span>' + esc(thinkingText()) + '…</span></div><p class="slow" hidden></p></div>';
     log.appendChild(wait); down(true);
+    stopper = window.AbortController ? new AbortController() : null; setSend();
+    /* a warning if it's slow, so nobody thinks it's broken */
+    var slowEl = wait.querySelector(".slow"), said = function (t) { if (slowEl) { slowEl.textContent = t; slowEl.hidden = false; down(); } };
+    var timers = [
+      setTimeout(function () { said("Still working. Hard questions can take a minute or two."); }, 20000),
+      setTimeout(function () { said("This is taking longer than usual. Press ■ to stop, or keep waiting (up to 5 minutes)."); }, 75000)];
+    var quiet = function () { timers.forEach(clearTimeout); timers = []; };
+    function onEvent(o) {
+      if (o.thread && o.thread !== thread) { thread = o.thread; history.replaceState(null, "", "?c=" + encodeURIComponent(thread)); }
+      if (liveBody) return;
+      var st = wait.querySelector(".think span");
+      if (o.s === "thinking" && st) st.textContent = (choice === "auto" || choice === "priority" ? "Thinking it through" : labelOf(choice) + " is thinking it through") + "…";
+      if (o.s === "next") said("That AI was busy or slow, so another one is answering instead.");
+    }
     var payload = { action: "send", thread: thread, text: text, model: choice, files: files.map(function (f) { return { name: f.name, text: f.text }; }) };
     if (cut) payload.cut = cut;
-    sb.functions.invoke("hwchat", { body: payload }).then(function (r) {
-      if (r.error && !r.data) return (r.error.context && r.error.context.json ? r.error.context.json() : Promise.resolve(null)).then(function (x) { return x || { error: r.error.message || "Something went wrong." }; }, function () { return { error: "Something went wrong." }; });
-      return r.data;
-    }).then(function (d) {
-      wait.remove();
+    /* the answer streams in: words show as the AI writes them */
+    var live = "", liveBody = null, liveTimer = 0;
+    function onDelta(t) {
+      live += t;
+      if (!liveBody) {
+        quiet();
+        wait.innerHTML = '<span class="mark" aria-hidden="true">✦</span><div><div class="body"></div></div>';
+        liveBody = wait.querySelector(".body");
+      }
+      if (!liveTimer) liveTimer = setTimeout(function () { liveTimer = 0; liveBody.innerHTML = md(live, true); down(); }, 60);
+    }
+    callStream(payload, onDelta, onEvent, stopper && stopper.signal).then(function (d) {
+      if (liveTimer) { clearTimeout(liveTimer); liveTimer = 0; }
+      quiet(); wait.remove();
       if (d && d.thread && d.thread !== thread) { thread = d.thread; history.replaceState(null, "", "?c=" + encodeURIComponent(thread)); }
       var u = msgs[msgs.length - 1];
+      if (d && d.stoppedHere) {   // you pressed Stop: keep what it wrote
+        u.pending = false;
+        var part = live.trim() ? { role: "ai", body: live, model: "", stopped: true } : null;
+        if (part) msgs.push(part); else msgs.push({ role: "note", body: "Stopped before it answered, so that message didn't count." });
+        render(); syncIds(thread, u, part); return;
+      }
       if (!d || d.error) {
         if (cut) { reloadAfterError((d && d.error) || "Something went wrong - try again."); return; }
         msgs.pop(); render();
         msgs.push({ role: "ai", err: true, body: (d && d.error) || "Something went wrong - try again." });
+        if (d && d.inhouse && info) { info.inhouse = Object.assign({}, info.inhouse || {}, d.inhouse); meter(); }
+        if (d && d.outOfInhouse) msgs.push({ role: "note", html: '<button type="button" data-usage="1">See your in-house AI usage</button>' });
         if (d && d.outOfFree) msgs.push({ role: "note", html: 'Out of free messages for today. <button type="button" data-usehaiku="1">Use Claude Haiku' + (info ? " (" + info.haiku_pence + "p)" : "") + "</button>" });
         render(); $("text").value = text; grow(); setSend(); return;
       }
       u.id = d.user_id; u.pending = false;
+      if (d.inhouse && info) { info.inhouse = Object.assign({}, info.inhouse || {}, d.inhouse); meter(); }
       if (d.removed && d.removed.length) msgs.push({ role: "note", body: "🔒 I took out " + d.removed.join(", ") + " before sending - please don't share personal information." });
       if (d.compacted) msgs.push({ role: "note", body: "This chat is getting long, so older messages were summarised to keep it going." });
       var a = { role: "ai", id: d.ai_id, body: d.reply, model: d.by, pence: d.pence, remembered: d.remembered, typing: true };
-      msgs.push(a); render();
+      msgs.push(a);
+      if (d.note) msgs.push({ role: "note", html: esc(d.note) + ' <button type="button" data-usage="1">See usage</button>' });
+      if (d.cut) msgs.push({ role: "note", body: "⚠ This answer may have been cut short. Say “carry on” to get the rest." });
+      render();
       var body = log.querySelector(".turn.a.last .body");
       var finish = function () { delete a.typing; render(); };
-      if (body) reveal(body, d.reply, finish); else finish();
-    }).catch(function () { wait.remove(); msgs.pop(); render(); msgs.push({ role: "ai", err: true, body: "Couldn't reach the server - check your internet and try again." }); render(); $("text").value = text; })
-      .then(function () { busy = false; setSend(); loadInfo(); listThreads(); if (!mob.matches) $("text").focus(); });
+      if (body && !liveBody) reveal(body, d.reply, finish); else finish();   // already written in live: no need to type it again
+    }).catch(function () { quiet(); wait.remove(); msgs.pop(); render(); msgs.push({ role: "ai", err: true, body: "Couldn't reach the server - check your internet and try again." }); render(); $("text").value = text; })
+      .then(function () { busy = false; stopper = null; setSend(); loadInfo(); listThreads(); if (!mob.matches) $("text").focus(); });
+  }
+  /* send to the chat function and read the answer as it streams; an older server just sends one reply */
+  function callStream(payload, onDelta, onEvent, signal) {
+    payload.stream = true;
+    var stoppedHere = function (e) { if (signal && signal.aborted) return { stoppedHere: true }; throw e; };
+    return sb.auth.getSession().then(function (s) {
+      var tok = s.data && s.data.session && s.data.session.access_token;
+      return fetch(URL_ + "/functions/v1/hwchat", { method: "POST", headers: { Authorization: "Bearer " + tok, apikey: KEY_, "content-type": "application/json" }, body: JSON.stringify(payload), signal: signal || undefined });
+    }).then(function (r) {
+      var ct = r.headers.get("content-type") || "";
+      if (ct.indexOf("text/event-stream") < 0 || !r.body || !window.TextDecoder) return r.json().catch(function () { return { error: "Something went wrong - try again." }; });
+      var reader = r.body.getReader(), dec = new TextDecoder(), buf = "", done = null;
+      function pump() {
+        return reader.read().then(function (x) {
+          if (x.done) return done || { error: "The answer stopped early - try again." };
+          buf += dec.decode(x.value, { stream: true });
+          var i;
+          while ((i = buf.indexOf("\n\n")) >= 0) {
+            var ev = buf.slice(0, i); buf = buf.slice(i + 2);
+            ev.split("\n").forEach(function (line) {
+              if (line.indexOf("data:") !== 0) return;
+              try { var o = JSON.parse(line.slice(5)); if (o.t) onDelta(o.t); else if (o.done) done = o; else if (onEvent) onEvent(o); } catch (e) {}
+            });
+          }
+          return pump();
+        });
+      }
+      return pump();
+    }).catch(stoppedHere);
+  }
+  /* after Stop the server saves the message a moment later: pick up the saved ids
+     (so Edit and Retry work) without reloading the chat */
+  function syncIds(tid, u, a) {
+    if (!tid) return;
+    var tries = 0;
+    (function look() {
+      sb.from("hw_messages").select("id,role,model").eq("thread_id", tid).order("id", { ascending: false }).limit(2).then(function (r) {
+        if (thread !== tid) return;
+        var rows = r.data || [], lu = rows.filter(function (x) { return x.role === "user"; })[0], la = rows.filter(function (x) { return x.role === "ai"; })[0];
+        if (lu && (!a || (la && la.id > lu.id))) { u.id = lu.id; if (a && la) { a.id = la.id; a.model = la.model || ""; } if (!busy) render(); listThreads(); return; }
+        if (++tries < 6) setTimeout(look, 1500);
+      });
+    })();
   }
   function reloadAfterError(why) {
     openThread(thread, function () { msgs.push({ role: "ai", err: true, body: why }); render(); });
@@ -261,8 +341,15 @@
     $("text").value = ""; grow();
     ask(t, files, null, 0);
   }
-  $("form").onsubmit = function (e) { e.preventDefault(); send(); };
-  function setSend() { $("sendBtn").disabled = busy || (!$("text").value.trim() && !attach.length); }
+  var stopper = null;
+  $("form").onsubmit = function (e) { e.preventDefault(); if (busy) { if (stopper) stopper.abort(); return; } send(); };
+  /* while an answer is coming the button is Stop (■), like Claude's */
+  function setSend() {
+    var b = $("sendBtn"), stop = busy && !!stopper;
+    b.classList.toggle("stop", stop); b.textContent = stop ? "■" : "↑";
+    b.setAttribute("aria-label", stop ? "Stop" : "Send"); b.title = stop ? "Stop" : "";
+    b.disabled = stop ? false : busy || (!$("text").value.trim() && !attach.length);
+  }
   function grow() { var ta = $("text"); ta.style.height = "auto"; ta.style.height = Math.min(240, ta.scrollHeight) + "px"; setSend(); }
   $("text").addEventListener("input", grow);
   /* "@kimi ..." sends one message to that AI: suggest names while typing the @ word */
@@ -353,7 +440,7 @@
     if (id === "priority") return info.haiku_pence + "–" + (info.opus_pence != null ? info.opus_pence : info.sonnet_pence) + "p";
     var p = info[id + "_pence"]; return p == null ? "" : p + "p";
   }
-  function saveChoice() { try { localStorage.setItem("hl.ai.pick", choice); } catch (e) {} }
+  function saveChoice() { try { localStorage.setItem("hl.ai.pick2", choice); } catch (e) {} }
   function drawModel() {
     var c = findChoice(choice) || choices[0]; if (!c) return;
     var exact = /^m:/.test(c.id);
@@ -368,7 +455,7 @@
       if (g[1]) out += "<h3>" + esc(g[1]) + "</h3>";
       out += list.map(function (c) {
         return '<button type="button" class="opt" role="menuitemradio" aria-checked="' + (c.id === choice) + '" data-pick="' + esc(c.id) + '"><span class="ic">' + (ICON[c.id] || "🤖") + "</span><b>" + esc(c.label) + "</b>" +
-          (c.free ? "<span></span>" : "<em>" + esc(priceOf(c.id)) + "</em>") + "<small>" + esc(c.sub) + "</small></button>";
+          (c.free ? (c.id === "inhouse" && info && info.inhouse && !info.inhouse.unlimited ? "<em class=\"ih\">" + Math.round((info.inhouse.session_used / (info.inhouse.session_limit || 1)) * 100) + "% used</em>" : "<span></span>") : "<em>" + esc(priceOf(c.id)) + "</em>") + "<small>" + esc(c.sub) + "</small></button>";
       }).join("");
     });
     if (allModels.length) {
@@ -387,13 +474,17 @@
   }
   function menu(open) {
     var m = $("menu"); if (open == null) open = m.hidden;
-    if (open) { drawMenu(); m.hidden = false; $("modelBtn").setAttribute("aria-expanded", "true"); var cur = m.querySelector('[aria-checked="true"]'); (cur || m.querySelector(".opt")).focus(); }
+    if (open) {
+      /* never taller than the room above the message box, so the top choices stay on screen */
+      var room = $("form").getBoundingClientRect().top - 16;
+      m.style.maxHeight = Math.max(200, Math.min(480, room)) + "px";
+      drawMenu(); m.hidden = false; $("modelBtn").setAttribute("aria-expanded", "true"); var cur = m.querySelector('[aria-checked="true"]'); (cur || m.querySelector(".opt")).focus(); }
     else { m.hidden = true; $("modelBtn").setAttribute("aria-expanded", "false"); }
   }
   $("modelBtn").onclick = function () { menu(); };
   $("menu").addEventListener("click", function (e) {
     var b = e.target.closest("[data-pick]"); if (!b) return;
-    choice = b.dataset.pick; saveChoice(); drawModel(); menu(false); $("text").focus(); render();
+    choice = b.dataset.pick; saveChoice(); drawModel(); meter(); menu(false); $("text").focus(); render();
   });
   $("menu").addEventListener("input", function (e) {
     if (e.target.id !== "mSearch") return;
@@ -418,7 +509,12 @@
   function meter() {
     var q = $("quota"); if (!info) { q.hidden = true; return; }
     q.hidden = false;
-    if (info.unlimited) { q.className = "quota"; q.style.setProperty("--p", 1); $("quotaText").textContent = "Unlimited"; }
+    var ih = info.inhouse;
+    if (choice === "inhouse" && ih && !ih.unlimited) {
+      var sp = ih.session_limit ? Math.min(1, ih.session_used / ih.session_limit) : 0, wp = ih.week_limit ? Math.min(1, ih.week_used / ih.week_limit) : 0, worst = Math.max(sp, wp);
+      q.className = "quota" + (worst >= 1 ? " out" : worst > 0.8 ? " low" : ""); q.style.setProperty("--p", 1 - worst);
+      $("quotaText").innerHTML = "<b>" + Math.round(sp * 100) + "%</b><span class=\"lbl\"> of session used</span>";
+    } else if (info.unlimited) { q.className = "quota"; q.style.setProperty("--p", 1); $("quotaText").textContent = "Unlimited"; }
     else {
       var left = Math.max(0, info.free_per_day - info.free_used), p = info.free_per_day ? left / info.free_per_day : 0;
       q.className = "quota" + (left === 0 ? " out" : p < 0.2 ? " low" : ""); q.style.setProperty("--p", p);
@@ -431,7 +527,60 @@
     $("memBtn").hidden = info.memory_on == null;   // needs command 17 on the server
     drawModel();
   }
-  function loadInfo() { return sb.rpc("hw_info").then(function (r) { if (!r.error && r.data) { info = r.data; meter(); } }); }
+  /* ---------- usage, like Claude's: a 5-hour session and a week that resets on Monday ---------- */
+  function clock(t, withDay) {
+    var d = new Date(t), now = new Date(), opts = { hour: "numeric", minute: "2-digit", hour12: true };
+    var time = d.toLocaleTimeString("en-GB", opts).replace(/\s?(am|pm)$/i, function (m) { return " " + m.trim().toUpperCase(); });
+    if (!withDay && d.toDateString() === now.toDateString()) return time;
+    return d.toLocaleDateString("en-GB", { weekday: "long" }) + " " + time;
+  }
+  function pace(ih) {
+    if (ih.unlimited) return "Unlimited on your account.";
+    var start = new Date(ih.week_starts).getTime(), end = new Date(ih.week_resets).getTime(), now = Date.now();
+    var gone = Math.max(0.01, Math.min(1, (now - start) / (end - start))), used = ih.week_limit ? ih.week_used / ih.week_limit : 0;
+    var day = new Date(end).toLocaleDateString("en-GB", { weekday: "long" });
+    if (used >= 1) return "You've used this week's allowance. It's back " + clock(ih.week_resets, true) + ". Other AIs still work meanwhile.";
+    if (used <= gone + 0.05) return "On track. You should reach " + day + "'s reset with room to spare.";
+    var runOut = start + (end - start) * (gone / used);
+    if (runOut >= end) return "A little ahead of pace, but you should still reach " + day + "'s reset.";
+    return "At this pace you'll run out around " + new Date(runOut).toLocaleDateString("en-GB", { weekday: "long" }) + " " + (new Date(runOut).getHours() < 12 ? "morning" : new Date(runOut).getHours() < 17 ? "afternoon" : "evening") + ", before " + day + "'s reset.";
+  }
+  function bar(label, sub, used, limit) {
+    var p = limit ? Math.min(100, Math.round(used / limit * 100)) : 0;
+    return '<div class="ubar"><div class="uhead"><b>' + label + '</b><span>' + p + '% used</span></div><div class="utrack" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + p + '" aria-label="' + esc(label) + '"><i style="width:' + p + '%"' + (p >= 100 ? ' class="full"' : p > 80 ? ' class="hi"' : "") + '></i></div><small>' + sub + "</small></div>";
+  }
+  function usageHtml() {
+    if (!info) return "<p>Loading…</p>";
+    var out = "<h2>Usage</h2>";
+    var ih = info.inhouse, hasIn = ih && choices.some(function (c) { return c.id === "inhouse"; });
+    if (hasIn) {
+      out += '<h3>✦ Launchpad AI</h3>';
+      if (ih.unlimited) out += '<p class="upace">Unlimited on your account.</p>';
+      else {
+        out += '<p class="upace">' + esc(pace(ih)) + "</p>";
+        out += bar("Current session", ih.session_resets ? "Resets at " + esc(clock(ih.session_resets)) : "Starts with your next in-house message and lasts " + ih.session_hours + " hours", ih.session_used, ih.session_limit);
+        out += bar("This week", "Resets " + esc(clock(ih.week_resets, true)), ih.week_used, ih.week_limit);
+      }
+    }
+    out += "<h3>Free AIs</h3>";
+    if (info.unlimited) out += '<p class="upace">Unlimited on your account.</p>';
+    else {
+      var midnight = new Date(); midnight.setHours(24, 0, 0, 0);
+      out += bar("Today", "Tops up at midnight · " + Math.max(0, info.free_per_day - info.free_used) + " of " + info.free_per_day + " left", info.free_used, info.free_per_day);
+    }
+    out += '<h3>Claude</h3><p class="upace">' + Number(info.pence).toLocaleString("en-GB") + "p to spend. Earn more in Level Up.</p>";
+    return out;
+  }
+  function usage(open) {
+    var u = $("usage"); if (open == null) open = u.hidden;
+    if (open) { u.innerHTML = usageHtml(); u.hidden = false; $("quota").setAttribute("aria-expanded", "true"); }
+    else { u.hidden = true; $("quota").setAttribute("aria-expanded", "false"); }
+  }
+  $("quota").addEventListener("click", function () { usage(); if (!$("usage").hidden) loadInfo(); });
+  document.addEventListener("click", function (e) { if (!$("usage").hidden && !e.target.closest("#usage,#quota")) usage(false); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && !$("usage").hidden) usage(false); });
+
+  function loadInfo() { return sb.rpc("hw_info").then(function (r) { if (!r.error && r.data) { info = r.data; meter(); if (!$("usage").hidden) $("usage").innerHTML = usageHtml(); } }); }
 
   /* ---------- memory ---------- */
   function openMemory() {
@@ -516,8 +665,9 @@
   function openThread(id, then) {
     thread = id; history.replaceState(null, "", "?c=" + encodeURIComponent(id)); drawThreads();
     unhello(); log.innerHTML = '<p class="note">Loading…</p>';
-    sb.from("hw_messages").select("id,role,body,model,pence,files").eq("thread_id", id).order("id").limit(500).then(function (r) {
-      msgs = (r.data || []).map(function (m) { return { id: m.id, role: m.role, body: m.body, model: m.role === "ai" ? m.model : "", pence: m.pence, files: m.files }; });
+    var q = function (cols) { return sb.from("hw_messages").select(cols).eq("thread_id", id).order("id").limit(500); };
+    q("id,role,body,model,pence,files,stopped").then(function (r) { return r.error ? q("id,role,body,model,pence,files") : r; }).then(function (r) {
+      msgs = (r.data || []).map(function (m) { return { id: m.id, role: m.role, body: m.body, model: m.role === "ai" ? m.model : "", pence: m.pence, files: m.files, stopped: !!m.stopped }; });
       render(); down(true); if (then) then();
     });
   }
@@ -539,7 +689,7 @@
       sb.functions.invoke("hwchat", { body: { action: "models" } }).then(function (r) {
         choices = (r.data && r.data.choices) || []; allModels = (r.data && r.data.all) || [];
         if (!choices.length) { gate("<h2>Launchpad AI</h2><p>Launchpad AI needs the latest Launchpad update on the server.</p>"); return; }
-        if (!findChoice(choice)) choice = "auto";
+        if (!findChoice(choice)) choice = findChoice("inhouse") ? "inhouse" : "auto";
         drawModel(); loadInfo();
         var c = new URLSearchParams(location.search).get("c");
         listThreads(); if (c) openThread(c); else hello();

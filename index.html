@@ -128,6 +128,7 @@ button.chip{cursor:pointer}
 .think{color:var(--soft);display:flex;align-items:center;gap:8px;min-height:28px}
 .think i{width:8px;height:8px;border-radius:50%;background:var(--a1);animation:pulse 1s ease-in-out infinite}
 @keyframes pulse{50%{opacity:.25;transform:scale(.7)}}
+.slow{margin:6px 0 0;font-size:.8rem;color:var(--warn);max-width:46ch}
 .a.err .body{color:var(--bad)}
 .edit{width:min(620px,100%);display:flex;flex-direction:column;gap:8px;background:var(--card);border:1px solid var(--a1);border-radius:16px;padding:10px 12px}
 .edit textarea{border:0;outline:0;resize:none;font:inherit;background:transparent;color:var(--ink);min-height:60px}
@@ -149,6 +150,8 @@ button.chip{cursor:pointer}
 .mbtn small{color:var(--warn);font-weight:600}
 .send{border:0;border-radius:11px;width:36px;height:36px;background:var(--ink);color:var(--bg);font-size:1rem;display:grid;place-items:center}
 .send:disabled{opacity:.35;cursor:default}
+.send.stop{font-size:.78rem;background:var(--ink);opacity:1;cursor:pointer}
+.send.stop:hover{background:var(--bad)}
 .fine{max-width:780px;margin:7px auto 0;font-size:.73rem;color:var(--faint);text-align:center}
 .menu{position:absolute;bottom:calc(100% + 6px);left:8px;width:min(340px,calc(100vw - 32px));max-height:min(480px,62vh);overflow:auto;background:var(--card);border:1px solid var(--rule);border-radius:14px;box-shadow:0 12px 40px -10px rgba(10,12,40,.35);padding:6px;z-index:30}
 .menu h3{font-size:.72rem;color:var(--faint);margin:8px 10px 3px;font-weight:600}
@@ -168,6 +171,22 @@ button.chip{cursor:pointer}
 .atbox button[aria-selected="true"],.atbox button:hover{background:var(--hover)}
 .atbox b{font-size:.88rem;font-family:var(--mono)}
 .atbox small{color:var(--faint);font-size:.76rem;margin-left:auto}
+.quota{cursor:pointer;font:inherit;font-size:.82rem;color:var(--ink)}
+.quota:hover{border-color:var(--a1)}
+.top{position:relative}
+.usage{position:absolute;top:calc(100% + 4px);right:12px;width:min(360px,calc(100vw - 24px));background:var(--card);border:1px solid var(--rule);border-radius:16px;box-shadow:0 18px 50px -14px rgba(10,12,40,.4);padding:16px 18px 14px;z-index:35}
+.usage h2{font-size:1.05rem;margin:0 0 4px}
+.usage h3{font-size:.78rem;color:var(--faint);margin:14px 0 6px;font-weight:600}
+.upace{font-size:.86rem;color:var(--soft);margin:0 0 8px;line-height:1.45}
+.ubar{margin:0 0 12px}
+.uhead{display:flex;justify-content:space-between;font-size:.88rem;margin-bottom:5px}
+.uhead span{color:var(--soft);font-size:.82rem}
+.utrack{height:8px;border-radius:99px;background:var(--rule);overflow:hidden}
+.utrack i{display:block;height:100%;background:var(--a1);border-radius:99px}
+.utrack i.hi{background:var(--warn)}.utrack i.full{background:var(--bad)}
+.ubar small{display:block;color:var(--faint);font-size:.76rem;margin-top:4px}
+.opt em.ih{color:var(--soft)}
+.note button[data-usage]{font-weight:600}
 /* file preview panel, beside the chat */
 .panel{width:min(48vw,720px);flex:none;border-left:1px solid var(--rule);background:var(--card);display:flex;flex-direction:column;min-height:0}
 .panel header{display:flex;align-items:center;gap:6px;padding:10px 10px 10px 16px;border-bottom:1px solid var(--rule)}
@@ -227,7 +246,8 @@ dialog::backdrop{background:rgba(10,12,30,.45)}
     <button class="ib" id="sideOpen" type="button" aria-label="Show chats" title="Show chats">☰</button>
     <button class="title" id="title" type="button" title="Rename this chat" hidden></button>
     <span class="sp"></span>
-    <span class="quota" id="quota" hidden><span class="ring" aria-hidden="true"></span><span id="quotaText"></span></span>
+    <button type="button" class="quota" id="quota" hidden aria-haspopup="dialog" aria-expanded="false" aria-controls="usage" title="Usage"><span class="ring" aria-hidden="true"></span><span id="quotaText"></span></button>
+    <div class="usage" id="usage" role="dialog" aria-label="Usage" hidden></div>
     <button class="ib" id="themeBtn" type="button" aria-label="Dark or light"></button>
   </header>
   <div class="scroll" id="scroll"><div class="log" id="log" aria-live="polite"></div></div>
@@ -263,6 +283,6 @@ dialog::backdrop{background:rgba(10,12,30,.45)}
 </div></dialog>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.0/dist/umd/supabase.js"></script>
 <script src="https://civilinitiatives.org/auth-store.js?b=20261026a"></script>
-<script src="/app.js?b=20261112a"></script>
+<script src="/app.js?b=20261112f"></script>
 </body>
 </html>
