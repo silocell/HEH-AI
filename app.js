@@ -160,6 +160,7 @@
     d.classList.add("a"); if (m.err) d.classList.add("err");
     d.innerHTML = '<span class="mark" aria-hidden="true">✦</span><div><div class="body">' + (m.typing ? "" : m.err ? esc(m.body) : cites(md(m.body), m.sources)) + "</div>" +
       (m.sources && m.sources.length && !m.typing ? sourcesHtml(m.sources) : "") +
+      (m.action && !m.typing ? actionHtml(m.action, i) : "") +
       (m.remembered && m.remembered.length ? '<button type="button" class="memo" data-mem="1">🧠 Memory updated: ' + esc(m.remembered.join("; ")) + "</button>" : "") +
       '<div class="acts">' + (m.err ? "" : '<button class="ib" type="button" data-copytext="' + i + '">Copy</button>') +
       (last && userBefore(i) >= 0 ? '<button class="ib" type="button" data-retry="' + i + '" title="Ask again with ' + esc(labelOf(choice)) + '">↻ Retry</button>' : "") +
@@ -182,6 +183,67 @@
     return '<div class="srcs" aria-label="Sources">' + src.map(function (s) { var u = srcUrl(s.url); if (!u) return "";
       return '<a href="' + esc(u) + '" target="_blank" rel="noopener noreferrer nofollow" title="' + esc(s.title) + '"><b>' + (+s.n) + "</b><span>" + esc(s.title) + "</span><small>" + esc(s.site) + "</small></a>"; }).join("") + "</div>";
   }
+  /* ---- Launchpad actions: a card for what the AI has ready; nothing is made until "Do it" ---- */
+  var APPS = { Write: { icon: "✍️", path: "write", kind: "doc" }, Notebook: { icon: "📓", path: "notebook", kind: "note" }, Present: { icon: "🎞️", path: "present", kind: "deck" }, Grid: { icon: "📊", path: "grid", kind: "sheet" } };
+  var OPEN = { Write: "https://suite.civilinitiatives.org/write/", Notebook: "https://suite.civilinitiatives.org/notebook/", Present: "https://suite.civilinitiatives.org/present/", Grid: "https://suite.civilinitiatives.org/grid/",
+    Files: "https://files.civilinitiatives.org/", Games: "https://civilinitiatives.org/games/", "Level Up": "https://civilinitiatives.org/levelup/", "Launchpad AI": "https://ai.civilinitiatives.org/", Suite: "https://suite.civilinitiatives.org/" };
+  var made = {};   // what was made in this visit: message index -> file link
+  function actionHtml(a, i) {
+    if (a.tool === "open_app") { var l = OPEN[a.app]; return l ? '<div class="actcard"><div class="ab"><a class="btn" href="' + esc(l) + '" target="_blank" rel="noopener">Open ' + esc(a.app) + " ↗</a></div></div>" : ""; }
+    var ap = APPS[a.app]; if (!ap) return "";
+    var what = a.tool === "make_slides" ? (a.slides || []).length + " slides" : a.tool === "make_spreadsheet" ? (a.rows || []).length + " rows" : a.tool === "make_notes" ? "a notebook" : "a document";
+    var prev = a.tool === "make_slides" ? (a.slides || []).map(function (s, k) { return (k + 1) + ". " + s.title; }).join("\n")
+      : a.tool === "make_spreadsheet" ? (a.rows || []).slice(0, 4).map(function (r) { return r.join(" | "); }).join("\n") : String(a.text || "").slice(0, 400);
+    var done = made[i];
+    return '<div class="actcard" data-acti="' + i + '"><div class="ah"><span class="ai" aria-hidden="true">' + ap.icon + "</span><span><b>" + esc(a.title || "Untitled") + "</b><small>" + esc(a.app) + " · " + esc(what) + "</small></span></div>" +
+      (prev ? '<p class="ap">' + esc(prev) + "</p>" : "") +
+      '<div class="ab">' + (done ? '<a class="btn" href="' + esc(done) + '" target="_blank" rel="noopener">Open in ' + esc(a.app) + ' ↗</a><span class="am">Made ✓</span>'
+        : '<button type="button" class="go" data-doit="' + i + '">Do it</button><span class="am">Makes it in your ' + esc(a.app) + "</span>") + "</div></div>";
+  }
+  function plainMd(t) {   // Markdown to tidy HTML for a document (the Suite cleans it again when it opens)
+    var out = [], list = null;
+    var inl = function (x) { return esc(x).replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<i>$2</i>"); };
+    String(t || "").replace(/\r/g, "").split("\n").forEach(function (ln) {
+      var h = /^(#{1,4})\s+(.*)$/.exec(ln), ul = /^\s*[-*•]\s+(.*)$/.exec(ln), ol = /^\s*\d+[.)]\s+(.*)$/.exec(ln);
+      if ((ul && list !== "ul") || (ol && list !== "ol") || (!ul && !ol && list)) { if (list) out.push("</" + list + ">"); list = null; }
+      if (ul || ol) { if (!list) { list = ul ? "ul" : "ol"; out.push("<" + list + ">"); } out.push("<li>" + inl((ul || ol)[1]) + "</li>"); return; }
+      if (h) { var n = Math.min(4, h[1].length); out.push("<h" + n + ">" + inl(h[2]) + "</h" + n + ">"); return; }
+      if (ln.trim()) out.push("<p>" + inl(ln) + "</p>");
+    });
+    if (list) out.push("</" + list + ">");
+    return out.join("") || "<p></p>";
+  }
+  function bodyFor(a) {
+    var id = function () { return Math.random().toString(36).slice(2, 10); }, now = new Date().toISOString();
+    if (a.tool === "make_document") return { html: plainMd(a.text) };
+    if (a.tool === "make_notes") return { sections: [{ id: id(), name: "Notes", color: "#7c3aed", pages: [{ id: id(), title: a.page_title || a.title || "Notes", html: plainMd(a.text), ink: [], created: now, updated: now }] }], look: { pc: "", rl: "" } };
+    if (a.tool === "make_slides") {
+      var box = function (x, y, w, h, size, role, html, extra) { var e = { id: id(), type: "text", x: x, y: y, w: w, h: h, size: size, role: role, html: html, align: "left" }; for (var k in extra || {}) e[k] = extra[k]; return e; };
+      var slides = [{ id: id(), layout: "title", trans: "fade", notes: "", els: [box(80, 160, 800, 120, 58, "title", esc(a.title || "My presentation"), { align: "center" }), box(120, 295, 720, 70, 26, "body", "", { align: "center", ph: "Click to add a subtitle" })] }];
+      (a.slides || []).forEach(function (s) {
+        slides.push({ id: id(), layout: "content", trans: "fade", notes: "", els: [box(60, 36, 840, 84, 40, "title", esc(s.title || "")), box(60, 135, 840, 370, 26, "body", (s.points || []).length ? "<ul>" + s.points.map(function (p) { return "<li>" + esc(p) + "</li>"; }).join("") + "</ul>" : "")] });
+      });
+      return { theme: "aurora", slides: slides };
+    }
+    if (a.tool === "make_spreadsheet") {
+      var cells = {}, col = function (c) { return String.fromCharCode(65 + c); };
+      (a.rows || []).slice(0, 200).forEach(function (r, ri) { r.slice(0, 26).forEach(function (v, ci) { if (v !== "" && v != null) cells[col(ci) + (ri + 1)] = { v: String(v) }; }); });
+      return { sheets: [{ name: "Sheet1", cells: cells, w: {}, rows: Math.max(100, (a.rows || []).length + 20), cols: 26 }], active: 0 };
+    }
+    return null;
+  }
+  log.addEventListener("click", function (e) {
+    var b = e.target.closest("[data-doit]"); if (!b) return;
+    var i = +b.dataset.doit, m = msgs[i], a = m && m.action, ap = a && APPS[a.app]; if (!ap) return;
+    var card = b.closest(".actcard"), note = card.querySelector(".am");
+    b.disabled = true; b.textContent = "Making it…";
+    var fid = window.crypto && crypto.randomUUID ? crypto.randomUUID() : "xxxxxxxx-xxxx-4xxx-8xxx-xxxxxxxxxxxx".replace(/x/g, function () { return (Math.random() * 16 | 0).toString(16); });
+    sb.from("office_files").insert({ id: fid, kind: ap.kind, title: String(a.title || "Untitled").slice(0, 120), body: bodyFor(a) }).then(function (r) {
+      if (r.error) { b.disabled = false; b.textContent = "Try again"; note.classList.add("bad"); note.textContent = /storage|full|400 files/i.test(r.error.message) ? r.error.message : "Couldn't make it just now - try again."; return; }
+      made[i] = "https://suite.civilinitiatives.org/" + ap.path + "/?id=" + encodeURIComponent(fid);
+      card.outerHTML = actionHtml(a, i);
+    });
+  });
   function userBefore(i) { for (var j = i - 1; j >= 0; j--) if (msgs[j].role === "user") return msgs[j].id ? j : -1; return -1; }
   function findChoice(id) { return choices.filter(function (x) { return x.id === id; })[0] || allModels.filter(function (x) { return x.id === id; })[0]; }
   function labelOf(id) { var c = findChoice(id); return c ? c.label : "Auto"; }
@@ -258,12 +320,15 @@
       if (o.s === "thinking" && st) st.textContent = (choice === "auto" || choice === "priority" ? "Thinking it through" : labelOf(choice) + " is thinking it through") + "…";
       if (o.s === "next") said("That AI was busy or slow, so another one is answering instead.");
       if (o.s === "searching" && st) st.textContent = "Searching the web…";
+      if (o.s === "tool" && st) st.textContent = o.say || "Working…";
       if (o.s === "reading" && st) st.textContent = "Reading " + o.n + " page" + (o.n === 1 ? "" : "s") + "…";
       if (o.sources) { liveSources = o.sources; if (st) st.textContent = "Writing an answer from " + o.sources.length + " source" + (o.sources.length === 1 ? "" : "s") + "…"; }
     }
     var payload = { action: "send", thread: thread, text: text, model: choice, files: files.map(function (f) { return { name: f.name, text: f.text }; }) };
     if (cut) payload.cut = cut;
-    if (connWeb && choice !== "hwlai") payload.search = true;
+    if (conn.web && choice !== "hwlai") payload.search = true;
+    var tl = CONNS.filter(function (c) { return conn[c.id]; }).map(function (c) { return c.id; });
+    if (tl.length && !connIsClaude()) payload.tools = tl;
     var liveSources = null;
     /* the answer streams in: words show as the AI writes them */
     var live = "", liveBody = null, liveTimer = 0;
@@ -302,7 +367,7 @@
       if (d.hwlai && info) { info.hwlai = Object.assign({}, info.hwlai || {}, d.hwlai); meter(); }
       if (d.removed && d.removed.length) msgs.push({ role: "note", body: "🔒 I took out " + d.removed.join(", ") + " before sending - please don't share personal information." });
       if (d.compacted) msgs.push({ role: "note", body: "This chat is getting long, so older messages were summarised to keep it going." });
-      var a = { role: "ai", id: d.ai_id, body: d.reply, model: d.by, pence: d.pence, remembered: d.remembered, sources: d.sources || null, typing: true };
+      var a = { role: "ai", id: d.ai_id, body: d.reply, model: d.by, pence: d.pence, remembered: d.remembered, sources: d.sources || null, action: d.action || null, typing: true };
       msgs.push(a);
       if (d.note) msgs.push({ role: "note", html: esc(d.note) + ' <button type="button" data-usage="1">See usage</button>' });
       if (d.cut) msgs.push({ role: "note", body: "⚠ This answer may have been cut short. Say “carry on” to get the rest." });
@@ -466,20 +531,46 @@
     var p = info[id + "_pence"]; return p == null ? "" : p + "p";
   }
   function saveChoice() { try { localStorage.setItem("hl.ai.pick2", choice); } catch (e) {} }
-  /* 🔌 Connectors: HWLAI web search can be switched on for any AI (HWLAI itself always searches) */
-  var connWeb = false; try { connWeb = localStorage.getItem("hl.ai.connweb") === "1"; } catch (e) {}
+  /* 🔌 Connectors: what Launchpad AI can use. HWLAI web search works with any AI; the others
+     are tools for the free AIs (Claude is paid per message, so it doesn't use them). */
+  var CONNS = [
+    { id: "web", icon: "🔎", name: "HWLAI web search", sub: "Search the web first and answer with sources. Uses HWLAI's allowance.", on: false },
+    { id: "revision", icon: "📚", name: "Revision sites", sub: "Look things up on revision sites only (BBC Bitesize, Corbettmaths, Seneca…). Uses HWLAI's allowance.", on: false },
+    { id: "make", icon: "✨", name: "Make things", sub: "Get Write documents, notes, slides and spreadsheets ready - you press Do it to make them.", on: true },
+    { id: "files", icon: "📁", name: "Your files", sub: "Look at and read your own Suite files when you ask about them.", on: true },
+    { id: "levelup", icon: "📈", name: "Level Up", sub: "See your Level Up progress.", on: true },
+    { id: "links", icon: "🔗", name: "Read links", sub: "Read a web page when you paste its link.", on: true },
+    { id: "calc", icon: "🧮", name: "Calculator", sub: "Work out sums exactly instead of guessing.", on: true }
+  ];
+  var conn = {}; CONNS.forEach(function (c) { conn[c.id] = c.on; });
+  try { var savedConn = JSON.parse(localStorage.getItem("hl.ai.conn") || "null"); if (savedConn) Object.keys(conn).forEach(function (k) { if (typeof savedConn[k] === "boolean") conn[k] = savedConn[k]; }); else if (localStorage.getItem("hl.ai.connweb") === "1") conn.web = true; } catch (e) {}
+  var connWeb = conn.web;
+  function connIsClaude() { var c = findChoice(choice); return !!(c && c.group === "claude"); }
   function drawConn() {
-    var b = $("connBtn"), cb = $("connWeb"); if (!b || !cb) return;
-    var always = choice === "hwlai", on = always || connWeb;
-    cb.checked = on; cb.disabled = always;
-    $("connWebSub").textContent = always ? "HWLAI always searches the web - pick another AI to switch this off." : "Search the web before answering, with sources. Uses HWLAI's allowance.";
-    b.classList.toggle("on", on && !always); b.querySelector(".connon").hidden = !(on && !always);
-    b.title = on && !always ? "Connectors: HWLAI web search is on" : "Connectors";
+    var b = $("connBtn"), box = $("connList"); if (!b || !box) return;
+    var hw = choice === "hwlai", claude = connIsClaude();
+    box.innerHTML = CONNS.map(function (c) {
+      var always = hw && c.id === "web", off = claude && c.id !== "web";
+      return '<label class="csw"><span class="ci" aria-hidden="true">' + c.icon + '</span><span class="ct"><b>' + esc(c.name) + "</b><small>" + esc(always ? "HWLAI always searches the web." : c.sub) + '</small></span><input type="checkbox" role="switch" data-conn="' + c.id + '"' + (conn[c.id] || always ? " checked" : "") + (always || off ? " disabled" : "") + "></label>";
+    }).join("");
+    $("connFine").textContent = claude ? "Claude only uses HWLAI web search - pick a free AI for the other connectors." : "Making something always needs you to press Do it.";
+    connWeb = conn.web;
+    var n = CONNS.filter(function (c) { return conn[c.id]; }).length;
+    b.classList.toggle("on", !!conn.web && !hw); b.querySelector(".connon").hidden = !(conn.web && !hw);
+    b.title = "Connectors (" + n + " on)";
   }
-  function connMenu(open) { var m = $("connMenu"); if (!m) return; m.hidden = !open; $("connBtn").setAttribute("aria-expanded", open ? "true" : "false"); if (open) { menu(false); drawConn(); } }
+  function connMenu(open) {
+    var m = $("connMenu"); if (!m) return;
+    if (open) { menu(false); drawConn(); m.style.maxHeight = Math.max(180, Math.min(520, $("form").getBoundingClientRect().top - 16)) + "px"; }   // stays on screen above the message box
+    m.hidden = !open; $("connBtn").setAttribute("aria-expanded", open ? "true" : "false");
+  }
   if ($("connBtn")) {
     $("connBtn").onclick = function (e) { e.stopPropagation(); connMenu($("connMenu").hidden); };
-    $("connWeb").onchange = function () { if (choice === "hwlai") return; connWeb = this.checked; try { localStorage.setItem("hl.ai.connweb", connWeb ? "1" : "0"); } catch (e) {} drawConn(); };
+    $("connList").addEventListener("change", function (e) {
+      var k = e.target.dataset && e.target.dataset.conn; if (!k) return;
+      conn[k] = e.target.checked; try { localStorage.setItem("hl.ai.conn", JSON.stringify(conn)); } catch (er) {} drawConn();
+      var again = $("connList").querySelector('[data-conn="' + k + '"]'); if (again) again.focus();
+    });
     document.addEventListener("click", function (e) { if (!$("connMenu").hidden && !e.target.closest("#connMenu,#connBtn")) connMenu(false); });
     document.addEventListener("keydown", function (e) { if (e.key === "Escape" && !$("connMenu").hidden) { connMenu(false); $("connBtn").focus(); } });
   }
@@ -711,8 +802,8 @@
     thread = id; history.replaceState(null, "", "?c=" + encodeURIComponent(id)); drawThreads();
     unhello(); log.innerHTML = '<p class="note">Loading…</p>';
     var q = function (cols) { return sb.from("hw_messages").select(cols).eq("thread_id", id).order("id").limit(500); };
-    q("id,role,body,model,pence,files,stopped,sources").then(function (r) { return r.error ? q("id,role,body,model,pence,files") : r; }).then(function (r) {
-      msgs = (r.data || []).map(function (m) { return { id: m.id, role: m.role, body: m.body, model: m.role === "ai" ? m.model : "", pence: m.pence, files: m.files, stopped: !!m.stopped, sources: Array.isArray(m.sources) ? m.sources : null }; });
+    q("id,role,body,model,pence,files,stopped,sources,action").then(function (r) { return r.error ? q("id,role,body,model,pence,files,stopped,sources") : r; }).then(function (r) { return r.error ? q("id,role,body,model,pence,files") : r; }).then(function (r) {
+      msgs = (r.data || []).map(function (m) { return { id: m.id, role: m.role, body: m.body, model: m.role === "ai" ? m.model : "", pence: m.pence, files: m.files, stopped: !!m.stopped, sources: Array.isArray(m.sources) ? m.sources : null, action: m.action && typeof m.action === "object" ? m.action : null }; });
       render(); down(true); if (then) then();
     });
   }
