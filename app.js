@@ -474,19 +474,88 @@
   document.addEventListener("click", function (e) { var b = e.target.closest("[data-at]"); if (b) { atPick(b.dataset.at); return; } if (atBox && !e.target.closest(".atbox,#text")) { atBox.remove(); atBox = null; } });
   $("text").addEventListener("keydown", function (e) { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); } });
 
-  /* ---------- attaching files (text and code; read here, sent as text) ---------- */
+  /* ---------- attaching files ----------
+     Text and code are read as they are. PowerPoint, Word, Excel and PDF are
+     opened here in the browser and only their words are sent (slide by slide,
+     page by page, sheet by sheet) - the file itself never leaves the device.
+     Pictures inside them aren't read. */
+  var OFFICE_EXT = /\.(pptx|docx|xlsx|pdf)$/i, OFFICE_MAX = 25 * 1024 * 1024;
+  var libs = {};
+  function lib(url) {
+    return libs[url] || (libs[url] = new Promise(function (ok, no) { var s = document.createElement("script"); s.src = url; s.onload = ok; s.onerror = function () { delete libs[url]; no(new Error("load")); }; document.head.appendChild(s); }));
+  }
+  var ZIP = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
+  var PDFJS = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/";
+  function xml(t) { return new DOMParser().parseFromString(t, "application/xml"); }
+  function tags(doc, name) { return Array.prototype.slice.call(doc.getElementsByTagNameNS("*", name)); }
+  function paras(doc, p, t) { return tags(doc, p).map(function (n) { return tags(n, t).map(function (x) { return x.textContent; }).join(""); }).filter(function (x) { return x.trim(); }).join("\n"); }
+  function num(name) { var m = /(\d+)\.xml$/.exec(name); return m ? +m[1] : 0; }
+  function officeText(f) {
+    var ext = f.name.split(".").pop().toLowerCase();
+    if (ext === "pdf") return lib(PDFJS + "pdf.min.js").then(function () {
+      var pj = window.pdfjsLib; pj.GlobalWorkerOptions.workerSrc = PDFJS + "pdf.worker.min.js";
+      return f.arrayBuffer().then(function (b) { return pj.getDocument({ data: b }).promise; }).then(function (pdf) {
+        var out = [], i = 0;
+        function next() {
+          if (++i > Math.min(pdf.numPages, 200)) return out.join("\n\n");
+          return pdf.getPage(i).then(function (pg) { return pg.getTextContent(); }).then(function (c) {
+            var t = c.items.map(function (x) { return x.str + (x.hasEOL ? "\n" : " "); }).join("").replace(/[ \t]+\n/g, "\n").trim();
+            if (t) out.push("--- Page " + i + " ---\n" + t); return next();
+          });
+        }
+        return next();
+      });
+    });
+    return lib(ZIP).then(function () { return window.JSZip.loadAsync(f); }).then(function (z) {
+      var names = Object.keys(z.files);
+      function read(n) { return z.file(n) ? z.file(n).async("string") : Promise.resolve(""); }
+      if (ext === "docx") return read("word/document.xml").then(function (t) { return paras(xml(t), "p", "t"); });
+      if (ext === "pptx") {
+        var slides = names.filter(function (n) { return /^ppt\/slides\/slide\d+\.xml$/.test(n); }).sort(function (a, b) { return num(a) - num(b); });
+        return Promise.all(slides.map(function (n) {
+          return Promise.all([read(n), read("ppt/notesSlides/notesSlide" + num(n) + ".xml")]).then(function (r) {
+            var body = paras(xml(r[0]), "p", "t"), notes = r[1] ? paras(xml(r[1]), "p", "t").replace(/^\d+$/m, "").trim() : "";
+            return "--- Slide " + num(n) + " ---\n" + (body || "(no words on this slide)") + (notes ? "\nSpeaker notes: " + notes : "");
+          });
+        })).then(function (a) { return a.join("\n\n"); });
+      }
+      /* xlsx: every sheet as rows of cells, tab-separated */
+      return Promise.all([read("xl/sharedStrings.xml"), read("xl/workbook.xml")]).then(function (r) {
+        var shared = r[0] ? tags(xml(r[0]), "si").map(function (si) { return tags(si, "t").map(function (x) { return x.textContent; }).join(""); }) : [];
+        var sheetNames = r[1] ? tags(xml(r[1]), "sheet").map(function (x) { return x.getAttribute("name"); }) : [];
+        var sheets = names.filter(function (n) { return /^xl\/worksheets\/sheet\d+\.xml$/.test(n); }).sort(function (a, b) { return num(a) - num(b); });
+        return Promise.all(sheets.map(function (n, k) {
+          return read(n).then(function (t) {
+            var rows = tags(xml(t), "row").slice(0, 2000).map(function (row) {
+              return tags(row, "c").map(function (c) {
+                var v = tags(c, "v")[0], ty = c.getAttribute("t");
+                if (ty === "s" && v) return shared[+v.textContent] || "";
+                if (ty === "inlineStr") return tags(c, "t").map(function (x) { return x.textContent; }).join("");
+                return v ? v.textContent : "";
+              }).join("\t");
+            }).filter(function (x) { return x.replace(/\t/g, "").trim(); });
+            return "--- Sheet: " + (sheetNames[k] || "Sheet " + (k + 1)) + " ---\n" + rows.join("\n");
+          });
+        })).then(function (a) { return a.join("\n\n"); });
+      });
+    });
+  }
   function addFiles(list) {
     Array.prototype.forEach.call(list, function (f) {
       if (attach.length >= 5) { toast("Up to 5 files at a time."); return; }
-      if (!TEXT_EXT.test(f.name) && !/^text\//.test(f.type)) { toast(f.name + ": only text and code files for now - copy the text in instead."); return; }
-      if (f.size > FILE_MAX) { toast(f.name + " is too big (up to " + kb(FILE_MAX) + ")."); return; }
-      f.text().then(function (t) {
-        if (/\u0000/.test(t.slice(0, 2000))) { toast(f.name + " isn't a text file."); return; }
+      var office = OFFICE_EXT.test(f.name);
+      if (/\.(ppt|doc|xls)$/i.test(f.name)) { toast(f.name + ": that's an old Office file - save it as ." + f.name.split(".").pop() + "x first."); return; }
+      if (!office && !TEXT_EXT.test(f.name) && !/^text\//.test(f.type)) { toast(f.name + ": I can read text, code, PowerPoint, Word, Excel and PDF files. Pictures aren't supported yet."); return; }
+      if (f.size > (office ? OFFICE_MAX : FILE_MAX)) { toast(f.name + " is too big (up to " + kb(office ? OFFICE_MAX : FILE_MAX) + ")."); return; }
+      if (office) toast("Reading " + f.name + "…");
+      (office ? officeText(f) : f.text()).then(function (t) {
+        if (!office && /\u0000/.test(t.slice(0, 2000))) { toast(f.name + " isn't a text file."); return; }
+        if (office && !t.trim()) { toast(f.name + " has no words I can read (it may be all pictures)."); return; }
         var used = attach.reduce(function (n, a) { return n + a.text.length; }, 0);
         if (used >= FILES_CHARS) { toast("That's as much as one message can take."); return; }
         if (used + t.length > FILES_CHARS) { t = t.slice(0, FILES_CHARS - used); toast(f.name + " was cut short to fit."); }
         attach.push({ name: f.name, text: t, size: f.size }); drawAtt();
-      });
+      }).catch(function () { toast("Couldn't open " + f.name + " - is it damaged, or password-protected?"); });
     });
   }
   function drawAtt() { var a = $("att"); a.hidden = !attach.length; a.innerHTML = chipsHtml(attach, true); setSend(); }
@@ -534,8 +603,8 @@
   /* 🔌 Connectors: what Launchpad AI can use. HWLAI web search works with any AI; the others
      are tools for the free AIs (Claude is paid per message, so it doesn't use them). */
   var CONNS = [
-    { id: "web", icon: "🔎", name: "HWLAI web search", sub: "Search the web first and answer with sources. Uses HWLAI's allowance.", on: false },
-    { id: "revision", icon: "📚", name: "Revision sites", sub: "Look things up on revision sites only (BBC Bitesize, Corbettmaths, Seneca…). Uses HWLAI's allowance.", on: false },
+    { id: "web", icon: "🔎", name: "HWLAI web search", sub: "Search the web first and answer with sources. Free.", on: false },
+    { id: "revision", icon: "📚", name: "Revision sites", sub: "Look things up on revision sites only (BBC Bitesize, Corbettmaths, Seneca…). Free.", on: false },
     { id: "make", icon: "✨", name: "Make things", sub: "Get Write documents, notes, slides and spreadsheets ready - you press Do it to make them.", on: true },
     { id: "files", icon: "📁", name: "Your files", sub: "Look at and read your own Suite files when you ask about them.", on: true },
     { id: "levelup", icon: "📈", name: "Level Up", sub: "See your Level Up progress.", on: true },
