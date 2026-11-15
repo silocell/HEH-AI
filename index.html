@@ -264,6 +264,13 @@ dialog::backdrop{background:rgba(10,12,30,.45)}
   .title{max-width:40vw}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+/* Notebook look (Make it yours): the shared notebook style is made for pages
+   with a header bar and cards; here the chat keeps its own layout, in the
+   notebook's paper and ink. */
+:root.nb:not(#nbai){--bg:var(--nb-paper);--card:var(--nb-card);--tool:var(--nb-card);--ink:var(--nb-text);--soft:var(--nb-soft);--faint:var(--nb-soft);--rule:var(--nb-line);--hover:color-mix(in srgb,var(--nb-ink) 8%,transparent);--on:color-mix(in srgb,var(--nb-ink) 15%,transparent);--me:color-mix(in srgb,var(--nb-ink) 10%,var(--nb-card));--codebg:color-mix(in srgb,var(--nb-ink) 6%,var(--nb-card))}
+html.nb:not(#nbai) body::before{display:none!important}
+html.nb:not(#nbai) .top{background:transparent!important;color:var(--ink)!important;box-shadow:none!important}
+html.nb:not(#nbai) .side{background:var(--nb-card)!important;border-right:2px solid color-mix(in srgb,var(--nb-margin) 55%,transparent)!important}
 </style>
 </head>
 <body>
