@@ -263,6 +263,7 @@
     }
     var payload = { action: "send", thread: thread, text: text, model: choice, files: files.map(function (f) { return { name: f.name, text: f.text }; }) };
     if (cut) payload.cut = cut;
+    if (connWeb && choice !== "hwlai") payload.search = true;
     var liveSources = null;
     /* the answer streams in: words show as the AI writes them */
     var live = "", liveBody = null, liveTimer = 0;
@@ -465,12 +466,30 @@
     var p = info[id + "_pence"]; return p == null ? "" : p + "p";
   }
   function saveChoice() { try { localStorage.setItem("hl.ai.pick2", choice); } catch (e) {} }
+  /* 🔌 Connectors: HWLAI web search can be switched on for any AI (HWLAI itself always searches) */
+  var connWeb = false; try { connWeb = localStorage.getItem("hl.ai.connweb") === "1"; } catch (e) {}
+  function drawConn() {
+    var b = $("connBtn"), cb = $("connWeb"); if (!b || !cb) return;
+    var always = choice === "hwlai", on = always || connWeb;
+    cb.checked = on; cb.disabled = always;
+    $("connWebSub").textContent = always ? "HWLAI always searches the web - pick another AI to switch this off." : "Search the web before answering, with sources. Uses HWLAI's allowance.";
+    b.classList.toggle("on", on && !always); b.querySelector(".connon").hidden = !(on && !always);
+    b.title = on && !always ? "Connectors: HWLAI web search is on" : "Connectors";
+  }
+  function connMenu(open) { var m = $("connMenu"); if (!m) return; m.hidden = !open; $("connBtn").setAttribute("aria-expanded", open ? "true" : "false"); if (open) { menu(false); drawConn(); } }
+  if ($("connBtn")) {
+    $("connBtn").onclick = function (e) { e.stopPropagation(); connMenu($("connMenu").hidden); };
+    $("connWeb").onchange = function () { if (choice === "hwlai") return; connWeb = this.checked; try { localStorage.setItem("hl.ai.connweb", connWeb ? "1" : "0"); } catch (e) {} drawConn(); };
+    document.addEventListener("click", function (e) { if (!$("connMenu").hidden && !e.target.closest("#connMenu,#connBtn")) connMenu(false); });
+    document.addEventListener("keydown", function (e) { if (e.key === "Escape" && !$("connMenu").hidden) { connMenu(false); $("connBtn").focus(); } });
+  }
 
   function drawModel() {
     var c = findChoice(choice) || choices[0]; if (!c) return;
     var exact = /^m:/.test(c.id);
     $("modelBtn").innerHTML = (exact ? "🎯" : (ICON[c.id] || "🤖")) + " " + esc(c.label) + (c.free === false ? " <small>" + esc(priceOf(c.id)) + "</small>" : "") + " ▾";
     $("modelBtn").title = exact ? c.label + " on " + c.by : c.sub;
+    if (typeof drawConn === "function") drawConn();
   }
   function drawMenu() {
     var m = $("menu"), out = "";
@@ -500,6 +519,7 @@
   function menu(open) {
     var m = $("menu"); if (open == null) open = m.hidden;
     if (open) {
+      if ($("connMenu") && !$("connMenu").hidden) { $("connMenu").hidden = true; $("connBtn").setAttribute("aria-expanded", "false"); }
       /* never taller than the room above the message box, so the top choices stay on screen */
       var room = $("form").getBoundingClientRect().top - 16;
       m.style.maxHeight = Math.max(200, Math.min(480, room)) + "px";
