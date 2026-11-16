@@ -2,7 +2,10 @@
 import json, os, re, time, urllib.request, statistics, datetime
 env = open(os.path.expanduser("~/supabase/.env")).read()
 get = lambda k: (re.search(r"^%s=(.*)$" % k, env, re.M) or [None, ""])[1].strip().strip('"')
-KEY = get("LAUNCHPAD_LLM_KEY"); URL = (get("LAUNCHPAD_LLM_URL") or "https://launchpad-llm-proxy-858591199828.us-central1.run.app/v1").rstrip("/")
+KEY = get("LAUNCHPAD_LLM_KEY"); _fn = open(os.path.expanduser("~/supabase/volumes/functions/hwchat/index.ts")).read() if os.path.exists(os.path.expanduser("~/supabase/volumes/functions/hwchat/index.ts")) else ""
+_m = re.search(r'GCP_LLM = .*?"(https://[^"]+)"', _fn)
+URL = (get("LAUNCHPAD_LLM_URL") or (_m.group(1) if _m else "")).rstrip("/")
+if not URL: raise SystemExit("can't find the gateway address")
 if not KEY: raise SystemExit("no LAUNCHPAD_LLM_KEY in .env")
 QS = ["Which planet is closest to the Sun? One sentence.",
       "Which university in Coventry has a business school called WBS? One sentence.",
