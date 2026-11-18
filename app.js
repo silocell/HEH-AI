@@ -324,7 +324,8 @@
       if (o.s === "reading" && st) st.textContent = "Reading " + o.n + " page" + (o.n === 1 ? "" : "s") + "…";
       if (o.sources) { liveSources = o.sources; if (st) st.textContent = "Writing an answer from " + o.sources.length + " source" + (o.sources.length === 1 ? "" : "s") + "…"; }
     }
-    var payload = { action: "send", thread: thread, text: text, model: choice, files: files.map(function (f) { return { name: f.name, text: f.text }; }) };
+    var payload = { action: "send", thread: thread, text: text, model: choice, files: files.map(function (f) { return { name: f.name, text: f.text }; }),
+      images: files.filter(function (f) { return f.img; }).map(function (f) { return { name: f.name, type: "image/jpeg", data: f.img }; }) };
     if (cut) payload.cut = cut;
     if (conn.web && choice !== "hwlai") payload.search = true;
     var tl = CONNS.filter(function (c) { return conn[c.id]; }).map(function (c) { return c.id; });
@@ -551,6 +552,15 @@
     });
     return ocrLib.then(function (T) { return T.recognize(f, "eng"); }).then(function (r) { return ((r && r.data && r.data.text) || "").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim(); });
   }
+  /* the picture itself, made smaller (longest side 1400px, JPEG), for the AI to look at */
+  function shrinkPicture(f) {
+    return (window.createImageBitmap ? createImageBitmap(f) : Promise.reject()).then(function (bm) {
+      var k = Math.min(1, 1400 / Math.max(bm.width, bm.height)), c = document.createElement("canvas");
+      c.width = Math.max(1, Math.round(bm.width * k)); c.height = Math.max(1, Math.round(bm.height * k));
+      var g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height); g.drawImage(bm, 0, 0, c.width, c.height);
+      return c.toDataURL("image/jpeg", 0.82).split(",")[1];
+    }).catch(function () { return null; });
+  }
   function addFiles(list) {
     Array.prototype.forEach.call(list, function (f) {
       if (attach.length >= 5) { toast("Up to 5 files at a time."); return; }
@@ -559,15 +569,18 @@
       if (isPicture(f)) {
         if (f.size > IMG_MAX) { toast((f.name || "That picture") + " is too big (up to 15 MB)."); return; }
         var label = !f.name || /^image\.(png|jpe?g|gif|webp)$/i.test(f.name) ? "Screenshot" : f.name;
-        toast("Reading the words in " + label + "…");
-        readPicture(f).then(function (t) {
-          if (t.replace(/\W/g, "").length < 3) { toast("I couldn't find any words in " + label + ". For now I can only read the words in pictures."); return; }
+        if (attach.filter(function (a) { return a.img; }).length >= 3) { toast("Up to 3 pictures in one message."); return; }
+        toast("Getting " + label + " ready…");
+        /* the picture goes to the AI, which looks at it; the words read here are a back-up if it can't */
+        Promise.all([shrinkPicture(f), readPicture(f).catch(function () { return ""; })]).then(function (r) {
+          var img = r[0], t = r[1] || "";
+          if (!img && t.replace(/\W/g, "").length < 3) { toast("Couldn't open " + label + "."); return; }
           var used = attach.reduce(function (n, a) { return n + a.text.length; }, 0);
-          if (used >= FILES_CHARS) { toast("That's as much as one message can take."); return; }
-          if (used + t.length > FILES_CHARS) t = t.slice(0, FILES_CHARS - used);
-          attach.push({ name: label + " (words from the picture)", text: t, size: f.size }); drawAtt();
-          toast("Read the words in " + label + ".");
-        }).catch(function () { toast("Couldn't read " + label + " just now. Check your connection and try again."); });
+          if (used + t.length > FILES_CHARS) t = t.slice(0, Math.max(0, FILES_CHARS - used));
+          var n = label; while (attach.some(function (a) { return a.name === n; })) n = label + " " + (attach.length + 1);
+          attach.push({ name: n, text: t.replace(/\W/g, "").length >= 3 ? "Words read from the picture:\n" + t : "(a picture)", size: f.size, img: img }); drawAtt();
+          toast(label + " added.");
+        });
         return;
       }
       if (!office && !TEXT_EXT.test(f.name) && !/^text\//.test(f.type)) { toast(f.name + ": I can read pictures, text, code, PowerPoint, Word, Excel and PDF files."); return; }
