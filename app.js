@@ -540,12 +540,37 @@
       });
     });
   }
+  /* Pictures and screenshots: the words in them are read on this device (Tesseract), and only those words are
+     sent, so the same safety check applies as for anything typed. The reader loads the first time it's needed. */
+  var IMG_EXT = /\.(png|jpe?g|webp|gif|bmp)$/i, IMG_MAX = 15 * 1024 * 1024, ocrLib = null;
+  function isPicture(f) { return (/^image\//.test(f.type) && !/svg/.test(f.type)) || IMG_EXT.test(f.name); }
+  function readPicture(f) {
+    if (!ocrLib) ocrLib = new Promise(function (ok, no) {
+      var sc = document.createElement("script"); sc.src = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
+      sc.onload = function () { ok(window.Tesseract); }; sc.onerror = function () { ocrLib = null; no(new Error("load")); }; document.head.appendChild(sc);
+    });
+    return ocrLib.then(function (T) { return T.recognize(f, "eng"); }).then(function (r) { return ((r && r.data && r.data.text) || "").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim(); });
+  }
   function addFiles(list) {
     Array.prototype.forEach.call(list, function (f) {
       if (attach.length >= 5) { toast("Up to 5 files at a time."); return; }
       var office = OFFICE_EXT.test(f.name);
       if (/\.(ppt|doc|xls)$/i.test(f.name)) { toast(f.name + ": that's an old Office file - save it as ." + f.name.split(".").pop() + "x first."); return; }
-      if (!office && !TEXT_EXT.test(f.name) && !/^text\//.test(f.type)) { toast(f.name + ": I can read text, code, PowerPoint, Word, Excel and PDF files. Pictures aren't supported yet."); return; }
+      if (isPicture(f)) {
+        if (f.size > IMG_MAX) { toast((f.name || "That picture") + " is too big (up to 15 MB)."); return; }
+        var label = !f.name || /^image\.(png|jpe?g|gif|webp)$/i.test(f.name) ? "Screenshot" : f.name;
+        toast("Reading the words in " + label + "…");
+        readPicture(f).then(function (t) {
+          if (t.replace(/\W/g, "").length < 3) { toast("I couldn't find any words in " + label + ". For now I can only read the words in pictures."); return; }
+          var used = attach.reduce(function (n, a) { return n + a.text.length; }, 0);
+          if (used >= FILES_CHARS) { toast("That's as much as one message can take."); return; }
+          if (used + t.length > FILES_CHARS) t = t.slice(0, FILES_CHARS - used);
+          attach.push({ name: label + " (words from the picture)", text: t, size: f.size }); drawAtt();
+          toast("Read the words in " + label + ".");
+        }).catch(function () { toast("Couldn't read " + label + " just now. Check your connection and try again."); });
+        return;
+      }
+      if (!office && !TEXT_EXT.test(f.name) && !/^text\//.test(f.type)) { toast(f.name + ": I can read pictures, text, code, PowerPoint, Word, Excel and PDF files."); return; }
       if (f.size > (office ? OFFICE_MAX : FILE_MAX)) { toast(f.name + " is too big (up to " + kb(office ? OFFICE_MAX : FILE_MAX) + ")."); return; }
       if (office) toast("Reading " + f.name + "…");
       (office ? officeText(f) : f.text()).then(function (t) {
